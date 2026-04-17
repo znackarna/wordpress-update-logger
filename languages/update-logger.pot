@@ -2,7 +2,7 @@
 # This file is distributed under the same license as the Update Logger plugin.
 msgid ""
 msgstr ""
-"Project-Id-Version: Update Logger 1.1.2\n"
+"Project-Id-Version: Update Logger 1.1.3\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-04-17 00:00+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
@@ -95,6 +95,22 @@ msgstr ""
 
 #: log-updates.php:524
 msgid "Filter"
+msgstr ""
+
+#: log-updates.php
+msgid "Core"
+msgstr ""
+
+#: log-updates.php
+msgid "Plugin"
+msgstr ""
+
+#: log-updates.php
+msgid "Theme"
+msgstr ""
+
+#: log-updates.php
+msgid "Translation"
 msgstr ""
 
 #: log-updates.php:545

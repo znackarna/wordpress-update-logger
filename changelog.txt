@@ -1,0 +1,14 @@
+= Changelog =
+
+== 1.1.3 – 2026-04-17 ==
+* Fixed: Update type filter labels (Core, Plugin, Theme, Translation) are now translatable
+* Updated: Czech translation includes all new type filter labels
+
+== 1.1.2 – 2026-04-17 ==
+* Initial public release
+* Logs all WordPress core, plugin, theme and translation updates
+* Tracks old/new version, method (auto/manual), status (ok/fail)
+* Detects update importance (major/minor/patch) via semver comparison
+* Admin log page with type and date filters, pagination, responsive layout
+* Multisite support (single shared table across the network)
+* Czech (cs_CZ) translation included

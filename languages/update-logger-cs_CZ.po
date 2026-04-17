@@ -3,7 +3,7 @@
 # This file is distributed under the same license as the Update Logger plugin.
 msgid ""
 msgstr ""
-"Project-Id-Version: Update Logger 1.1.2\n"
+"Project-Id-Version: Update Logger 1.1.3\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-04-17 00:00+0000\n"
 "PO-Revision-Date: 2026-04-17 00:00+0000\n"
@@ -95,6 +95,22 @@ msgstr "%1$s %2$d"
 #: log-updates.php
 msgid "Filter"
 msgstr "Filtrovat"
+
+#: log-updates.php
+msgid "Core"
+msgstr "Jádro"
+
+#: log-updates.php
+msgid "Plugin"
+msgstr "Plugin"
+
+#: log-updates.php
+msgid "Theme"
+msgstr "Šablona"
+
+#: log-updates.php
+msgid "Translation"
+msgstr "Překlad"
 
 #: log-updates.php
 msgid "No records yet."
