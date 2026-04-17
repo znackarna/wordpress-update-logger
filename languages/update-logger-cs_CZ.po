@@ -1,0 +1,91 @@
+# Czech translations for Update Logger plugin.
+# Copyright (C) 2026 značkárna s.r.o.
+# This file is distributed under the same license as the Update Logger plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Update Logger 1.1.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-04-17 00:00+0000\n"
+"PO-Revision-Date: 2026-04-17 00:00+0000\n"
+"Last-Translator: \n"
+"Language-Team: Czech\n"
+"Language: cs_CZ\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n>=2 && n<=4 ? 1 : 2);\n"
+"X-Generator: none\n"
+"X-Domain: update-logger\n"
+
+#: log-updates.php
+msgid "Major"
+msgstr "Zásadní"
+
+#: log-updates.php
+msgid "Minor"
+msgstr "Vedlejší"
+
+#: log-updates.php
+msgid "Patch"
+msgstr "Opravná"
+
+#: log-updates.php
+msgid "Update Log"
+msgstr "Protokol aktualizací"
+
+#: log-updates.php
+msgid "Date"
+msgstr "Datum"
+
+#: log-updates.php
+msgid "Type"
+msgstr "Typ"
+
+#: log-updates.php
+msgid "Slug"
+msgstr "Identifikátor"
+
+#: log-updates.php
+msgid "Old version"
+msgstr "Stará verze"
+
+#: log-updates.php
+msgid "New version"
+msgstr "Nová verze"
+
+#: log-updates.php
+msgid "Importance"
+msgstr "Důležitost"
+
+#: log-updates.php
+msgid "Status"
+msgstr "Stav"
+
+#: log-updates.php
+msgid "Method"
+msgstr "Způsob"
+
+#: log-updates.php
+msgid "All"
+msgstr "Vše"
+
+#: log-updates.php
+msgid "Filter by date"
+msgstr "Filtrovat podle data"
+
+#: log-updates.php
+msgid "All dates"
+msgstr "Všechna data"
+
+#. translators: %1$s: month name, %2$d: year
+#: log-updates.php
+msgid "%1$s %2$d"
+msgstr "%1$s %2$d"
+
+#: log-updates.php
+msgid "Filter"
+msgstr "Filtrovat"
+
+#: log-updates.php
+msgid "No records yet."
+msgstr "Zatím žádné záznamy."

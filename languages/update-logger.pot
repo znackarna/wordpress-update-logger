@@ -1,0 +1,92 @@
+# Copyright (C) 2026 značkárna s.r.o.
+# This file is distributed under the same license as the Update Logger plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Update Logger 1.1.2\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-04-17 00:00+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: none\n"
+"X-Domain: update-logger\n"
+
+#: log-updates.php:289
+msgid "Major"
+msgstr ""
+
+#: log-updates.php:293
+msgid "Minor"
+msgstr ""
+
+#: log-updates.php:296
+msgid "Patch"
+msgstr ""
+
+#: log-updates.php:340
+#: log-updates.php:341
+#: log-updates.php:470
+msgid "Update Log"
+msgstr ""
+
+#: log-updates.php:447
+msgid "Date"
+msgstr ""
+
+#: log-updates.php:448
+msgid "Type"
+msgstr ""
+
+#: log-updates.php:449
+msgid "Slug"
+msgstr ""
+
+#: log-updates.php:450
+msgid "Old version"
+msgstr ""
+
+#: log-updates.php:451
+msgid "New version"
+msgstr ""
+
+#: log-updates.php:452
+msgid "Importance"
+msgstr ""
+
+#: log-updates.php:453
+msgid "Status"
+msgstr ""
+
+#: log-updates.php:454
+msgid "Method"
+msgstr ""
+
+#: log-updates.php:484
+msgid "All"
+msgstr ""
+
+#: log-updates.php:501
+msgid "Filter by date"
+msgstr ""
+
+#: log-updates.php:504
+msgid "All dates"
+msgstr ""
+
+#. translators: %1$s: month name, %2$d: year
+#: log-updates.php:512
+msgid "%1$s %2$d"
+msgstr ""
+
+#: log-updates.php:524
+msgid "Filter"
+msgstr ""
+
+#: log-updates.php:545
+msgid "No records yet."
+msgstr ""
