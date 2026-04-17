@@ -16,6 +16,16 @@ msgstr ""
 "X-Generator: none\n"
 "X-Domain: update-logger\n"
 
+#. Plugin Name of the plugin
+#: log-updates.php
+msgid "Update Logger"
+msgstr ""
+
+#. Description of the plugin
+#: log-updates.php
+msgid "Logs all WordPress core, plugin and theme updates (auto & manual) to the database."
+msgstr ""
+
 #: log-updates.php:289
 msgid "Major"
 msgstr ""

@@ -17,6 +17,16 @@ msgstr ""
 "X-Generator: none\n"
 "X-Domain: update-logger\n"
 
+#. Plugin Name of the plugin
+#: log-updates.php
+msgid "Update Logger"
+msgstr "Záznam aktualizací"
+
+#. Description of the plugin
+#: log-updates.php
+msgid "Logs all WordPress core, plugin and theme updates (auto & manual) to the database."
+msgstr "Zaznamenává všechny aktualizace jádra WordPressu, pluginů a šablon (automatické i ruční) do databáze."
+
 #: log-updates.php
 msgid "Major"
 msgstr "Zásadní"
