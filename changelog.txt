@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.1.4 – 2026-04-17 ==
+* Fixed: Czech translation of "Update Log" changed from "Protokol aktualizací" to "Záznam aktualizací" for consistency
+
 == 1.1.3 – 2026-04-17 ==
 * Fixed: Update type filter labels (Core, Plugin, Theme, Translation) are now translatable
 * Updated: Czech translation includes all new type filter labels

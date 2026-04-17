@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.1.3
+ * Version:      1.1.4
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
