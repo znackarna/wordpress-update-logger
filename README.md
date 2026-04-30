@@ -2,7 +2,7 @@
 
 WordPress plugin that records every core, plugin, theme, and translation update — automatic or manual — into a dedicated database table. Provides an admin log page with filtering and importance classification.
 
-Author: [značkárna s.r.o.](https://github.com/znackarna) · Current version: **1.1.8** · License: **GPLv2 or later** · Network-aware (multisite-safe).
+Author: [značkárna s.r.o.](https://github.com/znackarna) · Current version: **1.1.9** · License: **GPLv2 or later** · Network-aware (multisite-safe).
 
 ---
 
@@ -107,6 +107,7 @@ update-logger/
 
 See [changelog.txt](changelog.txt). Most recent:
 
+- **1.1.9** — Removed the temporary diagnostic ring buffer; the install branch in `on_manual_update` now resolves the plugin/theme through a destination-name lookup against the full `get_plugins()` catalog (more cache-resilient than `$upgrader->plugin_info()`).
 - **1.1.8** — Belt-and-suspenders fallback hook (`upgrader_overwrote_package`) for ZIP-upload reinstalls plus a temporary diagnostic ring buffer on the admin log page.
 - **1.1.7** — Fix: ZIP-upload reinstalls (Add New → Upload Plugin → Replace) are now captured; the previous `$hook_extra['overwrite']` check was a no-op because WordPress never sets that key.
 - **1.1.6** — Admin pagination switched to the canonical WP_List_Table layout (item count, first/prev/next/last buttons).

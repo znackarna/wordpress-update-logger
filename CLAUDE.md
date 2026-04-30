@@ -64,11 +64,18 @@ If you ever rewrite `on_manual_update`, preserve both branches: regular `action=
 
 There is also a redundant second hook on `upgrader_overwrote_package` (added 1.1.8). It fires from `Plugin_Upgrader::install()` / `Theme_Upgrader::install()` only after a successful overwrite, with `($package, $new_data, 'plugin'|'theme')` — no upgrader instance, no plugin file path. The handler resolves the plugin file by matching `$new_data['Name']` + `$new_data['Version']` against `get_plugins()` (or `wp_get_themes()` for themes). Per-request dedup in `insert_row` prevents double-logging when both this and `upgrader_process_complete` fire for the same overwrite.
 
-### Temporary diagnostic ring buffer (1.1.8)
+### What 1.1.8 diagnostic told us, and what's left
 
-Site option `update_logger_hook_log` and the `<div class="notice notice-info">` block at the top of `render_page` are **diagnostic-only** — they record the last 10 fires of `upgrader_process_complete` / `upgrader_overwrote_package` (timestamp + json-encoded summary) and surface them in the admin UI with a Clear action. Added to chase down a hosting setup where `upgrader_process_complete` apparently doesn't fire for the upload-overwrite flow even though WP source says it should.
+1.1.8 shipped a temporary diagnostic ring buffer (`update_logger_hook_log` site option, `record_hook_fire()` helper, admin notice block) to debug a hosting where the upload-overwrite flow wasn't logged. It was removed in 1.1.9 — the redundant `upgrader_overwrote_package` hook reliably catches the case in production. Don't reintroduce a debug surface as a permanent feature; if a similar diagnostic is needed again, ship it and remove it as a one-cycle add.
 
-Once the issue is understood and the redundant hook proves sufficient across affected sites, this should be removed (probably 1.1.9 or 1.2.0): delete `HOOK_LOG_KEY`/`HOOK_LOG_MAX` constants, `record_hook_fire()`, both `record_hook_fire(...)` calls, the `ul_clear_hook_log` handler, and the diagnostic notice block in `render_page`. Don't leave it in production indefinitely — it's a debug surface, not a feature.
+What the diagnostic revealed (preserved here so the lesson isn't lost):
+
+- `upgrader_process_complete` *does* fire for upload-overwrite with `clear_destination=true` and `destination_name` set in `$upgrader->result`.
+- `$upgrader->plugin_info()` calls `get_plugins('/' . $destination_name)` which on at least one hosting setup returns empty inside that callback (likely a cache/timing artifact between the `wp_clean_plugins_cache` priority-9 callback and the subsequent `get_plugins()` lookup). So relying solely on `plugin_info()` was flaky.
+- `find_plugin_file_by_destination_name()` (1.1.9) iterates the full canonical `get_plugins()` map and matches by directory name. More cache-resilient. Falls back to `plugin_info()` only if that misses.
+- `upgrader_overwrote_package` (1.1.8) remains as a permanent second hook. It fires only after a successful overwrite and does its own Name+Version match via `find_plugin_file_by_data()`. Per-request dedup in `insert_row` keeps duplicates out when both hooks fire for the same operation.
+
+There's an orphaned `update_logger_hook_log` site option on sites that ran 1.1.8. It is harmless (≤2 KB ring buffer) and not cleaned up by 1.1.9 — adding a one-shot cleanup costs more code than the orphan is worth. If a future task requires touching network options, opportunistically delete it.
 
 ## Admin UI
 

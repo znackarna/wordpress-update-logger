@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.1.8
+ * Version:      1.1.9
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -37,8 +37,6 @@ final class Update_Logger
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
-	const HOOK_LOG_KEY = 'update_logger_hook_log'; // Diagnostic ring buffer (added 1.1.8).
-	const HOOK_LOG_MAX = 10;
 	const TEXT_DOMAIN = 'update-logger';
 	const MENU_SLUG   = 'update-logger';
 	const PER_PAGE    = 40;
@@ -209,22 +207,6 @@ final class Update_Logger
 		$action = $hook_extra['action'] ?? '';
 		$type   = $hook_extra['type']   ?? '';
 
-		// Diagnostic capture (1.1.8) — record every fire before any guard so the user
-		// can see in the admin UI whether the hook reaches us at all.
-		self::record_hook_fire('upgrader_process_complete', [
-			'action'           => $action,
-			'type'             => $type,
-			'has_plugin'       => isset($hook_extra['plugin']),
-			'has_plugins'      => isset($hook_extra['plugins']),
-			'has_themes'       => isset($hook_extra['themes']),
-			'clear_destination' => is_object($upgrader) && isset($upgrader->result['clear_destination'])
-				? (bool) $upgrader->result['clear_destination']
-				: null,
-			'destination_name' => is_object($upgrader) && isset($upgrader->result['destination_name'])
-				? (string) $upgrader->result['destination_name']
-				: '',
-		]);
-
 		// Accept two paths:
 		//   - regular bulk/single updates (Plugins → Update, and auto-updates that
 		//     internally route through bulk_upgrade) — action='update'.
@@ -258,11 +240,23 @@ final class Update_Logger
 			case 'plugin':
 				// action=update populates $hook_extra with plugins[] (bulk) or plugin (single).
 				// action=install (overwrite) provides neither — derive the plugin file from
-				// the upgrader, which has scanned the unpacked package after install.
+				// $upgrader->result['destination_name']. Prefer our own resolver (matches against
+				// the canonical full get_plugins() catalog) over $upgrader->plugin_info(), which
+				// uses get_plugins('/' . $name) and on at least one hosting setup returns empty
+				// inside the upgrader_process_complete callback.
 				$plugins = $hook_extra['plugins'] ?? (isset($hook_extra['plugin']) ? [$hook_extra['plugin']] : []);
-				if (empty($plugins) && $is_overwrite_install && method_exists($upgrader, 'plugin_info')) {
-					$derived = $upgrader->plugin_info();
-					if (is_string($derived) && '' !== $derived) {
+				if (empty($plugins) && $is_overwrite_install) {
+					$destination_name = is_object($upgrader) && isset($upgrader->result['destination_name'])
+						? (string) $upgrader->result['destination_name']
+						: '';
+					$derived = self::find_plugin_file_by_destination_name($destination_name);
+					if ('' === $derived && method_exists($upgrader, 'plugin_info')) {
+						$info = $upgrader->plugin_info();
+						if (is_string($info) && '' !== $info) {
+							$derived = $info;
+						}
+					}
+					if ('' !== $derived) {
 						$plugins = [$derived];
 					}
 				}
@@ -293,10 +287,19 @@ final class Update_Logger
 
 			case 'theme':
 				$themes = $hook_extra['themes'] ?? (isset($hook_extra['theme']) ? [$hook_extra['theme']] : []);
-				if (empty($themes) && $is_overwrite_install && method_exists($upgrader, 'theme_info')) {
-					$derived = $upgrader->theme_info();
-					if ($derived instanceof WP_Theme) {
-						$themes = [$derived->get_stylesheet()];
+				if (empty($themes) && $is_overwrite_install) {
+					$destination_name = is_object($upgrader) && isset($upgrader->result['destination_name'])
+						? (string) $upgrader->result['destination_name']
+						: '';
+					$derived = self::find_theme_stylesheet_by_destination_name($destination_name);
+					if ('' === $derived && method_exists($upgrader, 'theme_info')) {
+						$info = $upgrader->theme_info();
+						if ($info instanceof WP_Theme) {
+							$derived = $info->get_stylesheet();
+						}
+					}
+					if ('' !== $derived) {
+						$themes = [$derived];
 					}
 				}
 				foreach ($themes as $stylesheet) {
@@ -336,12 +339,6 @@ final class Update_Logger
 	 */
 	public static function on_overwrite_package($package, $new_data, $package_type): void
 	{
-		self::record_hook_fire('upgrader_overwrote_package', [
-			'package_type' => (string) $package_type,
-			'name'         => is_array($new_data) ? ($new_data['Name'] ?? '') : '',
-			'version'      => is_array($new_data) ? ($new_data['Version'] ?? '') : '',
-		]);
-
 		if (! is_array($new_data)) {
 			return;
 		}
@@ -418,6 +415,26 @@ final class Update_Logger
 		return '';
 	}
 
+	private static function find_plugin_file_by_destination_name(string $destination_name): string
+	{
+		if ('' === $destination_name) {
+			return '';
+		}
+		if (! function_exists('get_plugins')) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		foreach (get_plugins() as $file => $info) {
+			$dir = dirname($file);
+			if ('.' === $dir) {
+				$dir = basename($file, '.php');
+			}
+			if ($dir === $destination_name) {
+				return $file;
+			}
+		}
+		return '';
+	}
+
 	private static function find_theme_stylesheet_by_data(array $data): string
 	{
 		$name    = (string) ($data['Name'] ?? '');
@@ -436,23 +453,17 @@ final class Update_Logger
 		return '';
 	}
 
-	/**
-	 * Diagnostic ring buffer (1.1.8). Records the last HOOK_LOG_MAX upgrader hook fires so
-	 * the admin can confirm what reaches the plugin even when no row gets inserted.
-	 */
-	private static function record_hook_fire(string $hook, array $data): void
+	private static function find_theme_stylesheet_by_destination_name(string $destination_name): string
 	{
-		$entries = get_site_option(self::HOOK_LOG_KEY, []);
-		if (! is_array($entries)) {
-			$entries = [];
+		if ('' === $destination_name) {
+			return '';
 		}
-		array_unshift($entries, [
-			'ts'   => current_time('mysql'),
-			'hook' => $hook,
-			'data' => $data,
-		]);
-		$entries = array_slice($entries, 0, self::HOOK_LOG_MAX);
-		update_site_option(self::HOOK_LOG_KEY, $entries);
+		foreach (wp_get_themes() as $stylesheet => $theme) {
+			if ($stylesheet === $destination_name) {
+				return $stylesheet;
+			}
+		}
+		return '';
 	}
 
 	private static function resolve_slug(string $type, $item): string
@@ -655,22 +666,6 @@ final class Update_Logger
 			? network_admin_url('settings.php?page=' . self::MENU_SLUG)
 			: admin_url('tools.php?page=' . self::MENU_SLUG);
 
-		// --- Diagnostic ring buffer (1.1.8) --------------------------
-
-		if (
-			isset($_GET['ul_clear_hook_log'], $_GET['_wpnonce'])
-			&& wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'ul_clear_hook_log')
-		) {
-			delete_site_option(self::HOOK_LOG_KEY);
-			wp_safe_redirect(remove_query_arg(['ul_clear_hook_log', '_wpnonce']));
-			exit;
-		}
-
-		$hook_log = get_site_option(self::HOOK_LOG_KEY, []);
-		if (! is_array($hook_log)) {
-			$hook_log = [];
-		}
-
 		// --- Output --------------------------------------------------
 
 		// Column labels for responsive data-label attributes.
@@ -734,33 +729,6 @@ final class Update_Logger
 
 		<div class="wrap">
 			<h1><?php echo esc_html($col_date ? __('Update Log', self::TEXT_DOMAIN) : ''); ?></h1>
-
-			<?php if (! empty($hook_log)) :
-				$clear_url = wp_nonce_url(
-					add_query_arg('ul_clear_hook_log', '1', $base_url),
-					'ul_clear_hook_log'
-				);
-			?>
-				<div class="notice notice-info" style="margin:12px 0;padding:10px 14px;">
-					<p style="margin:0 0 8px;font-weight:600;">
-						Diagnostic — last <?php echo (int) count($hook_log); ?> upgrader hook fire(s)
-						<a href="<?php echo esc_url($clear_url); ?>" style="float:right;font-weight:400;">Clear</a>
-					</p>
-					<ol style="margin:0 0 0 22px;padding:0;font-family:Consolas,Menlo,monospace;font-size:12px;line-height:1.5;">
-						<?php foreach ($hook_log as $e) :
-							$ts   = isset($e['ts'])   ? (string) $e['ts']   : '';
-							$hook = isset($e['hook']) ? (string) $e['hook'] : '';
-							$data = isset($e['data']) && is_array($e['data']) ? $e['data'] : [];
-						?>
-							<li>
-								<strong><?php echo esc_html($ts); ?></strong>
-								— <code><?php echo esc_html($hook); ?></code>
-								<?php echo esc_html(wp_json_encode($data, JSON_UNESCAPED_UNICODE)); ?>
-							</li>
-						<?php endforeach; ?>
-					</ol>
-				</div>
-			<?php endif; ?>
 
 			<ul class="subsubsub">
 				<li>

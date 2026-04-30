@@ -1,5 +1,10 @@
 = Changelog =
 
+== 1.1.9 – 2026-04-30 ==
+* Removed: Diagnostic ring buffer (HOOK_LOG_KEY site option, record_hook_fire helper, admin notice block, ul_clear_hook_log handler). The redundant upgrader_overwrote_package hook from 1.1.8 verifiably catches ZIP-upload reinstalls in production, so the temporary debug surface is no longer needed
+* Improved: on_manual_update install branch derives the plugin/theme from $upgrader->result['destination_name'] via a new resolver against the canonical full get_plugins() / wp_get_themes() catalog, falling back to $upgrader->plugin_info() / theme_info() only on miss. Avoids the cache/timing artifact where plugin_info() returned empty inside the upgrader_process_complete callback and the row had to rely entirely on the redundant hook
+* Note: The 1.1.8 site option update_logger_hook_log is now orphaned. It is a tiny ring buffer (<2 KB) and will be left untouched; admins can delete it manually via the network options table if they care
+
 == 1.1.8 – 2026-04-30 ==
 * Added: Hook into upgrader_overwrote_package as a canonical fallback for ZIP-upload reinstalls (fires from Plugin_Upgrader::install() / Theme_Upgrader::install() after a successful overwrite). Plugin/theme is resolved by matching new metadata against the installed catalog
 * Added: Per-request deduplication in insert_row to prevent duplicate rows when both upgrader_process_complete and upgrader_overwrote_package fire for the same overwrite
