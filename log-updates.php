@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.1.5
+ * Version:      1.1.8
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -37,9 +37,19 @@ final class Update_Logger
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
+	const HOOK_LOG_KEY = 'update_logger_hook_log'; // Diagnostic ring buffer (added 1.1.8).
+	const HOOK_LOG_MAX = 10;
 	const TEXT_DOMAIN = 'update-logger';
 	const MENU_SLUG   = 'update-logger';
 	const PER_PAGE    = 40;
+
+	/**
+	 * Per-request dedup so the same overwrite-install isn't logged twice when both
+	 * upgrader_process_complete and upgrader_overwrote_package fire for it.
+	 *
+	 * @var array<string,bool>
+	 */
+	private static array $logged_keys = [];
 
 	/* ===========================================================
 	 *  Bootstrap
@@ -63,6 +73,11 @@ final class Update_Logger
 
 		// Manual updates via admin (single & bulk).
 		add_action('upgrader_process_complete', [__CLASS__, 'on_manual_update'], 10, 2);
+
+		// ZIP-upload reinstalls — canonical hook fired by Plugin_Upgrader::install() / Theme_Upgrader::install()
+		// after a successful overwrite. Belt-and-suspenders alongside upgrader_process_complete because some
+		// hosting setups appear to suppress the latter for the install path.
+		add_action('upgrader_overwrote_package', [__CLASS__, 'on_overwrite_package'], 10, 3);
 
 		// Admin log page.
 		if (is_multisite()) {
@@ -192,14 +207,41 @@ final class Update_Logger
 	public static function on_manual_update($upgrader, array $hook_extra): void
 	{
 		$action = $hook_extra['action'] ?? '';
+		$type   = $hook_extra['type']   ?? '';
 
-		// Accept regular updates and file-upload installs that overwrite an existing plugin/theme.
-		$is_overwrite = ! empty($hook_extra['overwrite']);
-		if ('update' !== $action && ! ('install' === $action && $is_overwrite)) {
+		// Diagnostic capture (1.1.8) — record every fire before any guard so the user
+		// can see in the admin UI whether the hook reaches us at all.
+		self::record_hook_fire('upgrader_process_complete', [
+			'action'           => $action,
+			'type'             => $type,
+			'has_plugin'       => isset($hook_extra['plugin']),
+			'has_plugins'      => isset($hook_extra['plugins']),
+			'has_themes'       => isset($hook_extra['themes']),
+			'clear_destination' => is_object($upgrader) && isset($upgrader->result['clear_destination'])
+				? (bool) $upgrader->result['clear_destination']
+				: null,
+			'destination_name' => is_object($upgrader) && isset($upgrader->result['destination_name'])
+				? (string) $upgrader->result['destination_name']
+				: '',
+		]);
+
+		// Accept two paths:
+		//   - regular bulk/single updates (Plugins → Update, and auto-updates that
+		//     internally route through bulk_upgrade) — action='update'.
+		//   - ZIP-upload reinstalls that overwrite an existing plugin/theme — action='install'
+		//     with $upgrader->result['clear_destination'] === true. WordPress does NOT add
+		//     an 'overwrite' key to $hook_extra; the only reliable signal is on the upgrader.
+		$is_overwrite_install = (
+			'install' === $action
+			&& is_object($upgrader)
+			&& isset($upgrader->result['clear_destination'])
+			&& true === $upgrader->result['clear_destination']
+		);
+
+		if ('update' !== $action && ! $is_overwrite_install) {
 			return;
 		}
 
-		$type     = $hook_extra['type'] ?? '';
 		$snapshot = get_site_transient(self::SNAP_KEY) ?: [];
 
 		// Fallback: if the snapshot is missing (WP-CLI, expired transient),
@@ -214,7 +256,16 @@ final class Update_Logger
 		switch ($type) {
 
 			case 'plugin':
+				// action=update populates $hook_extra with plugins[] (bulk) or plugin (single).
+				// action=install (overwrite) provides neither — derive the plugin file from
+				// the upgrader, which has scanned the unpacked package after install.
 				$plugins = $hook_extra['plugins'] ?? (isset($hook_extra['plugin']) ? [$hook_extra['plugin']] : []);
+				if (empty($plugins) && $is_overwrite_install && method_exists($upgrader, 'plugin_info')) {
+					$derived = $upgrader->plugin_info();
+					if (is_string($derived) && '' !== $derived) {
+						$plugins = [$derived];
+					}
+				}
 				if (! function_exists('get_plugin_data')) {
 					require_once ABSPATH . 'wp-admin/includes/plugin.php';
 				}
@@ -242,6 +293,12 @@ final class Update_Logger
 
 			case 'theme':
 				$themes = $hook_extra['themes'] ?? (isset($hook_extra['theme']) ? [$hook_extra['theme']] : []);
+				if (empty($themes) && $is_overwrite_install && method_exists($upgrader, 'theme_info')) {
+					$derived = $upgrader->theme_info();
+					if ($derived instanceof WP_Theme) {
+						$themes = [$derived->get_stylesheet()];
+					}
+				}
 				foreach ($themes as $stylesheet) {
 					$old   = $snapshot['theme'][$stylesheet]
 						?? $wp_update_transient->checked[$stylesheet]
@@ -268,8 +325,135 @@ final class Update_Logger
 	}
 
 	/* ===========================================================
+	 *  Logging — ZIP upload overwrite (canonical fallback)
+	 * =========================================================== */
+
+	/**
+	 * Fired by Plugin_Upgrader::install() / Theme_Upgrader::install() after a successful
+	 * overwrite-install. WordPress only passes ($package, $new_data, 'plugin'|'theme') —
+	 * no upgrader instance, no file path — so we match new_data against the installed
+	 * plugin/theme catalog by Name+Version to recover the slug/file.
+	 */
+	public static function on_overwrite_package($package, $new_data, $package_type): void
+	{
+		self::record_hook_fire('upgrader_overwrote_package', [
+			'package_type' => (string) $package_type,
+			'name'         => is_array($new_data) ? ($new_data['Name'] ?? '') : '',
+			'version'      => is_array($new_data) ? ($new_data['Version'] ?? '') : '',
+		]);
+
+		if (! is_array($new_data)) {
+			return;
+		}
+
+		$snapshot = get_site_transient(self::SNAP_KEY) ?: [];
+
+		if ('plugin' === $package_type) {
+			$file = self::find_plugin_file_by_data($new_data);
+			if ('' === $file) {
+				return; // Cannot resolve which plugin was overwritten.
+			}
+			$slug = dirname($file);
+			if ('.' === $slug) {
+				$slug = basename($file, '.php');
+			}
+			$old = $snapshot['plugin'][$file] ?? '?';
+			if ('?' === $old) {
+				$wp_up = get_site_transient('update_plugins');
+				if ($wp_up && isset($wp_up->checked[$file])) {
+					$old = $wp_up->checked[$file];
+				}
+			}
+			$new = (string) ($new_data['Version'] ?? '');
+			$status = $new ? 'ok' : 'fail';
+			if ($old !== '' && $old !== '?' && $old === $new) {
+				$status = 'fail';
+			}
+			self::insert_row('plugin', $slug, $old, $new, $status, 'manual');
+		} elseif ('theme' === $package_type) {
+			$stylesheet = self::find_theme_stylesheet_by_data($new_data);
+			if ('' === $stylesheet) {
+				return;
+			}
+			$old = $snapshot['theme'][$stylesheet] ?? '?';
+			if ('?' === $old) {
+				$wp_up = get_site_transient('update_themes');
+				if ($wp_up && isset($wp_up->checked[$stylesheet])) {
+					$old = $wp_up->checked[$stylesheet];
+				}
+			}
+			$new = (string) ($new_data['Version'] ?? '');
+			$status = $new ? 'ok' : 'fail';
+			if ($old !== '' && $old !== '?' && $old === $new) {
+				$status = 'fail';
+			}
+			self::insert_row('theme', $stylesheet, $old, $new, $status, 'manual');
+		}
+
+		self::snapshot_versions();
+	}
+
+	/* ===========================================================
 	 *  Helper functions
 	 * =========================================================== */
+
+	private static function find_plugin_file_by_data(array $data): string
+	{
+		if (! function_exists('get_plugins')) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+		$name    = (string) ($data['Name'] ?? '');
+		$version = (string) ($data['Version'] ?? '');
+		if ('' === $name) {
+			return '';
+		}
+		foreach (get_plugins() as $file => $info) {
+			if (
+				($info['Name'] ?? '') === $name
+				&& ($version === '' || ($info['Version'] ?? '') === $version)
+			) {
+				return $file;
+			}
+		}
+		return '';
+	}
+
+	private static function find_theme_stylesheet_by_data(array $data): string
+	{
+		$name    = (string) ($data['Name'] ?? '');
+		$version = (string) ($data['Version'] ?? '');
+		if ('' === $name) {
+			return '';
+		}
+		foreach (wp_get_themes() as $stylesheet => $theme) {
+			if (
+				$theme->get('Name') === $name
+				&& ($version === '' || $theme->get('Version') === $version)
+			) {
+				return $stylesheet;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Diagnostic ring buffer (1.1.8). Records the last HOOK_LOG_MAX upgrader hook fires so
+	 * the admin can confirm what reaches the plugin even when no row gets inserted.
+	 */
+	private static function record_hook_fire(string $hook, array $data): void
+	{
+		$entries = get_site_option(self::HOOK_LOG_KEY, []);
+		if (! is_array($entries)) {
+			$entries = [];
+		}
+		array_unshift($entries, [
+			'ts'   => current_time('mysql'),
+			'hook' => $hook,
+			'data' => $data,
+		]);
+		$entries = array_slice($entries, 0, self::HOOK_LOG_MAX);
+		update_site_option(self::HOOK_LOG_KEY, $entries);
+	}
 
 	private static function resolve_slug(string $type, $item): string
 	{
@@ -324,6 +508,15 @@ final class Update_Logger
 		string $status,
 		string $method
 	): void {
+		// Per-request dedup: when an upload-overwrite triggers both upgrader_process_complete
+		// and upgrader_overwrote_package in the same request, both callbacks would otherwise
+		// insert identical rows. Key on everything that uniquely identifies the event.
+		$key = "{$method}|{$type}|{$slug}|{$old}|{$new}|{$status}";
+		if (isset(self::$logged_keys[$key])) {
+			return;
+		}
+		self::$logged_keys[$key] = true;
+
 		global $wpdb;
 		$wpdb->insert(
 			self::table_name(),
@@ -462,6 +655,22 @@ final class Update_Logger
 			? network_admin_url('settings.php?page=' . self::MENU_SLUG)
 			: admin_url('tools.php?page=' . self::MENU_SLUG);
 
+		// --- Diagnostic ring buffer (1.1.8) --------------------------
+
+		if (
+			isset($_GET['ul_clear_hook_log'], $_GET['_wpnonce'])
+			&& wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'ul_clear_hook_log')
+		) {
+			delete_site_option(self::HOOK_LOG_KEY);
+			wp_safe_redirect(remove_query_arg(['ul_clear_hook_log', '_wpnonce']));
+			exit;
+		}
+
+		$hook_log = get_site_option(self::HOOK_LOG_KEY, []);
+		if (! is_array($hook_log)) {
+			$hook_log = [];
+		}
+
 		// --- Output --------------------------------------------------
 
 		// Column labels for responsive data-label attributes.
@@ -525,6 +734,33 @@ final class Update_Logger
 
 		<div class="wrap">
 			<h1><?php echo esc_html($col_date ? __('Update Log', self::TEXT_DOMAIN) : ''); ?></h1>
+
+			<?php if (! empty($hook_log)) :
+				$clear_url = wp_nonce_url(
+					add_query_arg('ul_clear_hook_log', '1', $base_url),
+					'ul_clear_hook_log'
+				);
+			?>
+				<div class="notice notice-info" style="margin:12px 0;padding:10px 14px;">
+					<p style="margin:0 0 8px;font-weight:600;">
+						Diagnostic — last <?php echo (int) count($hook_log); ?> upgrader hook fire(s)
+						<a href="<?php echo esc_url($clear_url); ?>" style="float:right;font-weight:400;">Clear</a>
+					</p>
+					<ol style="margin:0 0 0 22px;padding:0;font-family:Consolas,Menlo,monospace;font-size:12px;line-height:1.5;">
+						<?php foreach ($hook_log as $e) :
+							$ts   = isset($e['ts'])   ? (string) $e['ts']   : '';
+							$hook = isset($e['hook']) ? (string) $e['hook'] : '';
+							$data = isset($e['data']) && is_array($e['data']) ? $e['data'] : [];
+						?>
+							<li>
+								<strong><?php echo esc_html($ts); ?></strong>
+								— <code><?php echo esc_html($hook); ?></code>
+								<?php echo esc_html(wp_json_encode($data, JSON_UNESCAPED_UNICODE)); ?>
+							</li>
+						<?php endforeach; ?>
+					</ol>
+				</div>
+			<?php endif; ?>
 
 			<ul class="subsubsub">
 				<li>
@@ -633,14 +869,65 @@ final class Update_Logger
 				if ($filter_ym) {
 					$pag_base = add_query_arg('ym', $filter_ym, $pag_base);
 				}
-				echo '<div class="tablenav bottom"><div class="tablenav-pages">';
-				echo paginate_links([
-					'base'    => add_query_arg('paged', '%#%', $pag_base),
-					'format'  => '',
-					'current' => $page_num,
-					'total'   => $total_pages,
-				]);
-				echo '</div></div>';
+
+				$page_url = static function (int $p) use ($pag_base): string {
+					return add_query_arg('paged', max(1, $p), $pag_base);
+				};
+
+				$on_first = $page_num <= 1;
+				$on_last  = $page_num >= $total_pages;
+
+				$items_text = sprintf(
+					_n('%s item', '%s items', $total, self::TEXT_DOMAIN),
+					number_format_i18n($total)
+				);
+
+				$paging_text = sprintf(
+					/* translators: 1: Current page number, 2: Total page count. */
+					_x('%1$s of %2$s', 'paging', self::TEXT_DOMAIN),
+					'<span class="current-page">' . esc_html(number_format_i18n($page_num)) . '</span>',
+					'<span class="total-pages">' . esc_html(number_format_i18n($total_pages)) . '</span>'
+				);
+			?>
+				<div class="tablenav bottom">
+					<div class="tablenav-pages">
+						<span class="displaying-num"><?php echo esc_html($items_text); ?></span>
+						<span class="pagination-links">
+							<?php if ($on_first) : ?>
+								<span class="tablenav-pages-navspan button disabled" aria-hidden="true">&laquo;</span>
+								<span class="tablenav-pages-navspan button disabled" aria-hidden="true">&lsaquo;</span>
+							<?php else : ?>
+								<a class="first-page button" href="<?php echo esc_url($page_url(1)); ?>">
+									<span class="screen-reader-text"><?php esc_html_e('First page', self::TEXT_DOMAIN); ?></span>
+									<span aria-hidden="true">&laquo;</span>
+								</a>
+								<a class="prev-page button" href="<?php echo esc_url($page_url($page_num - 1)); ?>">
+									<span class="screen-reader-text"><?php esc_html_e('Previous page', self::TEXT_DOMAIN); ?></span>
+									<span aria-hidden="true">&lsaquo;</span>
+								</a>
+							<?php endif; ?>
+
+							<span class="paging-input">
+								<span class="tablenav-paging-text"><?php echo $paging_text; // safe HTML built above ?></span>
+							</span>
+
+							<?php if ($on_last) : ?>
+								<span class="tablenav-pages-navspan button disabled" aria-hidden="true">&rsaquo;</span>
+								<span class="tablenav-pages-navspan button disabled" aria-hidden="true">&raquo;</span>
+							<?php else : ?>
+								<a class="next-page button" href="<?php echo esc_url($page_url($page_num + 1)); ?>">
+									<span class="screen-reader-text"><?php esc_html_e('Next page', self::TEXT_DOMAIN); ?></span>
+									<span aria-hidden="true">&rsaquo;</span>
+								</a>
+								<a class="last-page button" href="<?php echo esc_url($page_url($total_pages)); ?>">
+									<span class="screen-reader-text"><?php esc_html_e('Last page', self::TEXT_DOMAIN); ?></span>
+									<span aria-hidden="true">&raquo;</span>
+								</a>
+							<?php endif; ?>
+						</span>
+					</div>
+				</div>
+			<?php
 			}
 			?>
 		</div>

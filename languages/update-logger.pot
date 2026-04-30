@@ -2,7 +2,7 @@
 # This file is distributed under the same license as the Update Logger plugin.
 msgid ""
 msgstr ""
-"Project-Id-Version: Update Logger 1.1.4\n"
+"Project-Id-Version: Update Logger 1.1.8\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-04-17 00:00+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
@@ -115,4 +115,32 @@ msgstr ""
 
 #: log-updates.php:545
 msgid "No records yet."
+msgstr ""
+
+#: log-updates.php
+msgid "%s item"
+msgid_plural "%s items"
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: 1: Current page number, 2: Total page count.
+#: log-updates.php
+msgctxt "paging"
+msgid "%1$s of %2$s"
+msgstr ""
+
+#: log-updates.php
+msgid "First page"
+msgstr ""
+
+#: log-updates.php
+msgid "Previous page"
+msgstr ""
+
+#: log-updates.php
+msgid "Next page"
+msgstr ""
+
+#: log-updates.php
+msgid "Last page"
 msgstr ""

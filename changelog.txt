@@ -1,5 +1,18 @@
 = Changelog =
 
+== 1.1.8 – 2026-04-30 ==
+* Added: Hook into upgrader_overwrote_package as a canonical fallback for ZIP-upload reinstalls (fires from Plugin_Upgrader::install() / Theme_Upgrader::install() after a successful overwrite). Plugin/theme is resolved by matching new metadata against the installed catalog
+* Added: Per-request deduplication in insert_row to prevent duplicate rows when both upgrader_process_complete and upgrader_overwrote_package fire for the same overwrite
+* Added: Temporary diagnostic ring buffer (last 10 upgrader hook fires, displayed as a notice on the admin log page with a Clear action). Captured before any guard so the admin can confirm whether the hook reaches the plugin at all. To be removed once the upload-overwrite logging path is verified across the affected hosting setups
+
+== 1.1.7 – 2026-04-30 ==
+* Fixed: ZIP-upload reinstalls (Plugins → Add New → Upload Plugin → Replace current with uploaded) are now logged. The previous overwrite check relied on a $hook_extra['overwrite'] key that WordPress never sets; the upgrader's clear_destination flag is checked instead, and the affected plugin/theme is derived from $upgrader->plugin_info() / theme_info() since action=install does not populate plugins/themes in $hook_extra
+* Improved: Plugin/theme slug for upload-overwrite installs is resolved via the upgrader, so old/new versions are recorded the same way as for regular updates
+
+== 1.1.6 – 2026-04-30 ==
+* Improved: Pagination on the admin log page now uses the standard WordPress admin layout (item count, first/prev/next/last button controls) instead of plain numbered links
+* Added: Translatable strings for pagination controls (item count, page X of Y, first/previous/next/last page)
+
 == 1.1.5 – 2026-04-30 ==
 * Added: GPLv2-or-later license declared in plugin header and shipped as LICENSE file
 * Added: Repository README with technical documentation

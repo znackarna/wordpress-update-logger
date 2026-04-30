@@ -3,7 +3,7 @@
 # This file is distributed under the same license as the Update Logger plugin.
 msgid ""
 msgstr ""
-"Project-Id-Version: Update Logger 1.1.5\n"
+"Project-Id-Version: Update Logger 1.1.8\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-04-17 00:00+0000\n"
 "PO-Revision-Date: 2026-04-17 00:00+0000\n"
@@ -115,3 +115,32 @@ msgstr "Překlad"
 #: log-updates.php
 msgid "No records yet."
 msgstr "Zatím žádné záznamy."
+
+#: log-updates.php
+msgid "%s item"
+msgid_plural "%s items"
+msgstr[0] "%s záznam"
+msgstr[1] "%s záznamy"
+msgstr[2] "%s záznamů"
+
+#. translators: 1: Current page number, 2: Total page count.
+#: log-updates.php
+msgctxt "paging"
+msgid "%1$s of %2$s"
+msgstr "%1$s z %2$s"
+
+#: log-updates.php
+msgid "First page"
+msgstr "První stránka"
+
+#: log-updates.php
+msgid "Previous page"
+msgstr "Předchozí stránka"
+
+#: log-updates.php
+msgid "Next page"
+msgstr "Další stránka"
+
+#: log-updates.php
+msgid "Last page"
+msgstr "Poslední stránka"

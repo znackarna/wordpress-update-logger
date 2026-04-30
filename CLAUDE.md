@@ -51,6 +51,25 @@ Two distinct paths, do not confuse them:
 
 The "version unchanged → status = fail" heuristic is intentional: it surfaces expired licenses on commercial plugins (the upgrader returns success but the same files are reinstalled). Do not remove this.
 
+### ZIP-upload reinstalls (Add New → Upload Plugin → Replace)
+
+This path fires `upgrader_process_complete` with `action='install'`, `type='plugin'`, and **nothing else** in `$hook_extra` — no `plugins`, no `plugin`, and **no `overwrite` key** (a previous version of the code checked `$hook_extra['overwrite']`, which WordPress never sets — that was a real bug, fixed in 1.1.7).
+
+The two reliable signals from this path live on the `$upgrader` object:
+
+- `$upgrader->result['clear_destination'] === true` → distinguishes overwrite-reinstall from a fresh install (we only want to log overwrites; fresh installs are not "updates").
+- `$upgrader->plugin_info()` (or `theme_info()->get_stylesheet()`) → returns the plugin file / theme stylesheet, since `$hook_extra` doesn't include it.
+
+If you ever rewrite `on_manual_update`, preserve both branches: regular `action='update'` (bulk_upgrade — covers both manual *Update Now* and the auto-update internal path) AND `action='install'` with `clear_destination=true` (upload-overwrite). Fresh installs (`action='install'` without clear_destination) must NOT be logged.
+
+There is also a redundant second hook on `upgrader_overwrote_package` (added 1.1.8). It fires from `Plugin_Upgrader::install()` / `Theme_Upgrader::install()` only after a successful overwrite, with `($package, $new_data, 'plugin'|'theme')` — no upgrader instance, no plugin file path. The handler resolves the plugin file by matching `$new_data['Name']` + `$new_data['Version']` against `get_plugins()` (or `wp_get_themes()` for themes). Per-request dedup in `insert_row` prevents double-logging when both this and `upgrader_process_complete` fire for the same overwrite.
+
+### Temporary diagnostic ring buffer (1.1.8)
+
+Site option `update_logger_hook_log` and the `<div class="notice notice-info">` block at the top of `render_page` are **diagnostic-only** — they record the last 10 fires of `upgrader_process_complete` / `upgrader_overwrote_package` (timestamp + json-encoded summary) and surface them in the admin UI with a Clear action. Added to chase down a hosting setup where `upgrader_process_complete` apparently doesn't fire for the upload-overwrite flow even though WP source says it should.
+
+Once the issue is understood and the redundant hook proves sufficient across affected sites, this should be removed (probably 1.1.9 or 1.2.0): delete `HOOK_LOG_KEY`/`HOOK_LOG_MAX` constants, `record_hook_fire()`, both `record_hook_fire(...)` calls, the `ul_clear_hook_log` handler, and the diagnostic notice block in `render_page`. Don't leave it in production indefinitely — it's a debug surface, not a feature.
+
 ## Admin UI
 
 - Renders inline `<style>` and inline `onclick` (the filter button uses a tiny inline script). No separate JS/CSS files. Keep it inline unless the page grows enough to need enqueueing.
