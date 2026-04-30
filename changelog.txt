@@ -1,5 +1,9 @@
 = Changelog =
 
+== 1.1.5 – 2026-04-30 ==
+* Added: GPLv2-or-later license declared in plugin header and shipped as LICENSE file
+* Added: Repository README with technical documentation
+
 == 1.1.4 – 2026-04-17 ==
 * Fixed: Czech translation of "Update Log" changed from "Protokol aktualizací" to "Záznam aktualizací" for consistency
 
