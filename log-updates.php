@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.1.9
+ * Version:      1.2.0
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -41,6 +41,12 @@ final class Update_Logger
 	const MENU_SLUG   = 'update-logger';
 	const PER_PAGE    = 40;
 
+	const UPDATE_REPO       = 'znackarna/wordpress-update-logger';
+	const UPDATE_SLUG       = 'wordpress-update-logger';
+	const UPDATE_CACHE_KEY  = 'update_logger_remote_release';
+	const UPDATE_CACHE_TTL  = 12 * HOUR_IN_SECONDS;
+	const UPDATE_ERROR_TTL  = 30 * MINUTE_IN_SECONDS;
+
 	/**
 	 * Per-request dedup so the same overwrite-install isn't logged twice when both
 	 * upgrader_process_complete and upgrader_overwrote_package fire for it.
@@ -55,6 +61,8 @@ final class Update_Logger
 
 	public static function init(): void
 	{
+		self::register_update_checker();
+
 		add_action('admin_init', [__CLASS__, 'maybe_create_table']);
 		add_action('plugins_loaded', [__CLASS__, 'load_textdomain']);
 
@@ -83,6 +91,182 @@ final class Update_Logger
 		} else {
 			add_action('admin_menu', [__CLASS__, 'register_menu']);
 		}
+	}
+
+	/* ===========================================================
+	 *  Update checker (GitHub releases)
+	 * =========================================================== */
+
+	/**
+	 * Hook into the WordPress update pipeline so each site polls GitHub releases
+	 * of this repo and surfaces new versions through the normal "Updates available"
+	 * UI. Without a published release on github.com/znackarna/wordpress-update-logger
+	 * no update is offered.
+	 */
+	public static function register_update_checker(): void
+	{
+		add_filter('pre_set_site_transient_update_plugins', [__CLASS__, 'inject_update']);
+		add_filter('plugins_api',                           [__CLASS__, 'plugins_api_details'], 10, 3);
+		add_filter('upgrader_source_selection',             [__CLASS__, 'rename_update_folder'], 10, 4);
+	}
+
+	/**
+	 * Inject our update into the plugins update transient when a newer release exists.
+	 */
+	public static function inject_update($transient)
+	{
+		if (!is_object($transient)) {
+			return $transient;
+		}
+
+		$latest = self::fetch_latest_release();
+		if ($latest === null) {
+			return $transient;
+		}
+
+		$plugin_file = plugin_basename(__FILE__);
+		$installed   = get_file_data(__FILE__, ['Version' => 'Version'])['Version'] ?? '0';
+
+		if (version_compare($latest['version'], $installed, '<=')) {
+			return $transient;
+		}
+
+		$update = (object) [
+			'slug'        => self::UPDATE_SLUG,
+			'plugin'      => $plugin_file,
+			'new_version' => $latest['version'],
+			'url'         => 'https://github.com/' . self::UPDATE_REPO,
+			'package'     => $latest['package'],
+			'tested'      => get_bloginfo('version'),
+			'icons'       => [],
+			'banners'     => [],
+		];
+
+		if (!isset($transient->response) || !is_array($transient->response)) {
+			$transient->response = [];
+		}
+		$transient->response[$plugin_file] = $update;
+
+		return $transient;
+	}
+
+	/**
+	 * Populate the "View version x.y.z details" popup with release metadata
+	 * (changelog from the GitHub release body, version, download link).
+	 *
+	 * @param mixed  $result
+	 * @param string $action
+	 * @param object $args
+	 * @return mixed
+	 */
+	public static function plugins_api_details($result, $action, $args)
+	{
+		if ($action !== 'plugin_information') {
+			return $result;
+		}
+		if (!isset($args->slug) || $args->slug !== self::UPDATE_SLUG) {
+			return $result;
+		}
+
+		$latest = self::fetch_latest_release();
+		if ($latest === null) {
+			return $result;
+		}
+
+		$headers = get_file_data(__FILE__, [
+			'Name'   => 'Plugin Name',
+			'Author' => 'Author',
+		]);
+
+		return (object) [
+			'name'          => $headers['Name'] ?: 'Update Logger',
+			'slug'          => self::UPDATE_SLUG,
+			'version'       => $latest['version'],
+			'author'        => $headers['Author'] ?: 'značkárna s.r.o.',
+			'homepage'      => 'https://github.com/' . self::UPDATE_REPO,
+			'download_link' => $latest['package'],
+			'last_updated'  => $latest['published_at'],
+			'sections'      => [
+				'changelog' => '<pre style="white-space:pre-wrap;font-family:inherit">'
+					. esc_html($latest['changelog']) . '</pre>',
+			],
+		];
+	}
+
+	/**
+	 * GitHub's zipball extracts to a folder like "znackarna-wordpress-update-logger-abc1234/".
+	 * Without renaming, WP would install the plugin under that random folder and the
+	 * plugin path would break (silently deactivating the plugin after every update).
+	 *
+	 * @param string      $source
+	 * @param string      $remote_source
+	 * @param \WP_Upgrader $upgrader
+	 * @param array       $hook_extra
+	 * @return string|\WP_Error
+	 */
+	public static function rename_update_folder($source, $remote_source, $upgrader, $hook_extra)
+	{
+		if (!is_string($source) || !is_string($remote_source)) {
+			return $source;
+		}
+		if (empty($hook_extra['plugin']) || $hook_extra['plugin'] !== plugin_basename(__FILE__)) {
+			return $source;
+		}
+
+		global $wp_filesystem;
+		$desired = trailingslashit($remote_source) . self::UPDATE_SLUG;
+		if ($wp_filesystem && trailingslashit($source) !== trailingslashit($desired)) {
+			if ($wp_filesystem->move($source, $desired, true)) {
+				return trailingslashit($desired);
+			}
+		}
+		return $source;
+	}
+
+	/**
+	 * Fetch the latest release from GitHub, cached for 12 hours.
+	 * On failure (network error, rate limit, malformed payload) caches a short-lived
+	 * error marker so we don't hammer the API.
+	 *
+	 * @return array{version:string,package:string,changelog:string,published_at:string}|null
+	 */
+	private static function fetch_latest_release(): ?array
+	{
+		$cached = get_site_transient(self::UPDATE_CACHE_KEY);
+		if (is_array($cached)) {
+			return !empty($cached['error']) ? null : $cached;
+		}
+
+		$response = wp_remote_get(
+			'https://api.github.com/repos/' . self::UPDATE_REPO . '/releases/latest',
+			[
+				'timeout' => 10,
+				'headers' => [
+					'Accept'     => 'application/vnd.github+json',
+					'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url(),
+				],
+			]
+		);
+
+		if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+			set_site_transient(self::UPDATE_CACHE_KEY, ['error' => true], self::UPDATE_ERROR_TTL);
+			return null;
+		}
+
+		$data = json_decode(wp_remote_retrieve_body($response), true);
+		if (!is_array($data) || empty($data['tag_name']) || empty($data['zipball_url'])) {
+			set_site_transient(self::UPDATE_CACHE_KEY, ['error' => true], self::UPDATE_ERROR_TTL);
+			return null;
+		}
+
+		$payload = [
+			'version'      => ltrim((string) $data['tag_name'], 'v'),
+			'package'      => (string) $data['zipball_url'],
+			'changelog'    => isset($data['body']) ? (string) $data['body'] : '',
+			'published_at' => isset($data['published_at']) ? (string) $data['published_at'] : '',
+		];
+		set_site_transient(self::UPDATE_CACHE_KEY, $payload, self::UPDATE_CACHE_TTL);
+		return $payload;
 	}
 
 	/* ===========================================================

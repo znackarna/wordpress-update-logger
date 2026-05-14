@@ -1,5 +1,10 @@
 = Changelog =
 
+== 1.2.0 – 2026-05-14 ==
+* Added: Self-update from GitHub releases. The plugin polls api.github.com/repos/znackarna/wordpress-update-logger/releases/latest once per 12 h and injects the latest tag into the WordPress update transient, so new versions appear in the standard "Plugins → Updates available" UI without any external library
+* Added: register_update_checker() wires three filters (pre_set_site_transient_update_plugins, plugins_api, upgrader_source_selection) and a 12-hour cached fetch_latest_release() helper. The upgrader_source_selection hook renames GitHub's zipball folder (znackarna-wordpress-update-logger-&lt;sha&gt;) to the canonical wordpress-update-logger slug so the plugin path survives the update
+* Note: Updates are driven by GitHub releases — without a published release (gh release create vX.Y.Z) no site sees the update. Header version must match the release tag (Version: X.Y.Z in plugin header, tag vX.Y.Z on GitHub)
+
 == 1.1.9 – 2026-04-30 ==
 * Removed: Diagnostic ring buffer (HOOK_LOG_KEY site option, record_hook_fire helper, admin notice block, ul_clear_hook_log handler). The redundant upgrader_overwrote_package hook from 1.1.8 verifiably catches ZIP-upload reinstalls in production, so the temporary debug surface is no longer needed
 * Improved: on_manual_update install branch derives the plugin/theme from $upgrader->result['destination_name'] via a new resolver against the canonical full get_plugins() / wp_get_themes() catalog, falling back to $upgrader->plugin_info() / theme_info() only on miss. Avoids the cache/timing artifact where plugin_info() returned empty inside the upgrader_process_complete callback and the row had to rely entirely on the redundant hook

@@ -97,7 +97,27 @@ There's an orphaned `update_logger_hook_log` site option on sites that ran 1.1.8
 3. Add a `== X.Y.Z – YYYY-MM-DD ==` block at the top of [changelog.txt](changelog.txt).
 4. If any `.po` strings changed, recompile `.mo` (msgfmt or equivalent).
 5. Commit with `vX.Y.Z: <summary>`.
-6. Do **not** push, tag, or create a GitHub release unless explicitly asked.
+6. Push the commit (`git push`) and publish a GitHub release with tag `vX.Y.Z` (`gh release create vX.Y.Z --title "vX.Y.Z" --notes "<changelog bullets>"`). This is the trigger every WordPress site needs — the bundled plugin-update-checker polls GitHub releases, so without a published release no site sees the update.
+
+## Update distribution (GitHub releases)
+
+The plugin self-updates via a tiny custom checker — no external library. It lives in the "Update checker (GitHub releases)" section of [log-updates.php](log-updates.php), wired up by `Update_Logger::register_update_checker()` from `init()`. Each site polls `api.github.com/repos/znackarna/wordpress-update-logger/releases/latest` once per 12 h, compares the installed `Version:` header against the latest release `tag_name`, and injects an entry into the `update_plugins` site transient when newer.
+
+Why it's hand-rolled instead of using `YahnisElsts/plugin-update-checker`: PUC is ~700 KB of library code covering BitBucket, GitLab, Gitea, theme updates, DebugBar integration, Parsedown, `readme.txt` parsing, etc. We use ~0.5% of it. For an in-house plugin distributed to known sites, the four hooks below are the entire surface area.
+
+### The four hooks
+
+1. **`pre_set_site_transient_update_plugins`** → `inject_update()`. Adds a fake update entry pointing `package` at `zipball_url` from the GitHub release. Only fires when remote version > installed version (`version_compare(..., '<=')` short-circuits the rest).
+2. **`plugins_api`** → `plugins_api_details()`. Powers the "View version x.y.z details" popup. Plugin name/author come from `get_file_data(__FILE__, …)` so the popup matches whatever's in the header. Changelog is the GitHub release body rendered as `<pre style="white-space:pre-wrap">` — no Markdown parsing, on purpose (it's admin-facing, escaped, readable enough).
+3. **`upgrader_source_selection`** → `rename_update_folder()`. GitHub's zipball extracts to `znackarna-wordpress-update-logger-<sha>/`. Without renaming to the canonical `wordpress-update-logger/` slug, WP would install the new version under the random folder and the plugin path (`wordpress-update-logger/log-updates.php`) would break, silently deactivating the plugin after every update. **Do not remove this filter.**
+4. The cache layer: `fetch_latest_release()` stores the release payload in site transient `update_logger_remote_release` for 12 h (`UPDATE_CACHE_TTL`). On HTTP error / 4xx / malformed JSON it stores `['error' => true]` for 30 min (`UPDATE_ERROR_TTL`) — short enough to recover from a transient outage, long enough to avoid hammering GitHub during a sustained rate-limit.
+
+### Conventions that the code assumes
+
+- **Header version must be the canonical version.** `inject_update()` reads `Version:` from `__FILE__` and compares against the release `tag_name` (with leading `v` stripped). Keep `Version: X.Y.Z` (no `v`) in the plugin header and tag releases as `vX.Y.Z`.
+- **No `setBranch`-like override.** We always look at `/releases/latest`, which automatically excludes drafts and prereleases. If you ever need rolling updates from `main`, that's a different mechanism — don't bolt it onto the release flow without a config flag.
+- **Public repo, no token.** If the repo ever goes private, add an `Authorization: token …` header in `fetch_latest_release()` reading from a `wp-config.php` constant (e.g. `UPDATE_LOGGER_GH_TOKEN`). Do not commit tokens to this repo, and remember the `package` URL (zipball) also needs the same Authorization header — for private repos you'd need an `upgrader_pre_download` filter to set it on the package download. (We don't need this today, but it's the gotcha that bites people first.)
+- **No release assets.** We use `zipball_url` (auto-generated source ZIP of the tag). If a future change introduces a build step that produces a different artifact, switch `fetch_latest_release()` to read `assets[0].browser_download_url` and update the release flow to upload that asset.
 
 ## What this plugin deliberately does NOT do
 
