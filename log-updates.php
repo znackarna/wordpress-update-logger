@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.3.1
+ * Version:      1.3.2
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -31,10 +31,17 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 defined('ABSPATH') || exit;
 
+// Backstop proti dvojímu načtení (kdyby týž soubor přišel jako mu-plugin i jako normální
+// plugin současně): nezakládej třídu podruhé, jinak fatal. Primární ochranu řeší mu wrapper
+// (nezavede se, když v plugins/ existuje standalone verze), tohle je druhá pojistka.
+if (class_exists('Update_Logger')) {
+    return;
+}
+
 final class Update_Logger
 {
 
-	const VERSION     = '1.3.1';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.3.2';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
