@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.2.2
+ * Version:      1.2.3
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -68,7 +68,11 @@ final class Update_Logger
 			self::register_update_checker();
 		}
 
-		add_action('admin_init', [__CLASS__, 'maybe_create_table']);
+		// Na `init` (ne jen admin_init), aby se tabulka + JSON mirror zmaterializovaly i bez
+		// návštěvy wp-adminu — na prvním front-end/REST požadavku po nasazení (mu-plugin režim,
+		// nasazuje značkárna web-audit konektor přes FTP). Guardováno get_site_option → dbDelta
+		// proběhne reálně jen jednou.
+		add_action('init', [__CLASS__, 'maybe_create_table']);
 		add_action('plugins_loaded', [__CLASS__, 'load_textdomain']);
 
 		// Version snapshot — only on pages where a manual update can occur.
