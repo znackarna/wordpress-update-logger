@@ -1,5 +1,9 @@
 = Changelog =
 
+== 1.3.0 – 2026-07-21 ==
+* Added: The JSON mirror now includes a "config" object with the current auto-update STATE — core level (off/minor/major, mirroring WP core's WP_AUTO_UPDATE_CORE / auto_update_core_major logic), pluginsAuto/pluginsTotal, themesAuto/themesTotal, per-plugin auto flags, and the updaterDisabled/fileModsDisabled blockers. WordPress core does not expose per-plugin auto-update state over REST (/wp/v2/plugins has no auto_update field), so the značkárna web-audit connector — which has no WP-CLI/DB access — reads it here instead. Source of truth: get_site_option('auto_update_plugins'/'auto_update_themes'), the WP_AUTO_UPDATE_CORE constant and auto_update_core_major option
+* Note: config is recomputed on every mirror write (each logged update + once on table creation), so the connector always sees the live auto-update configuration
+
 == 1.2.3 – 2026-07-21 ==
 * Changed: Table creation and JSON-mirror materialization now hook 'init' instead of only 'admin_init', so a freshly connector-deployed must-use plugin writes its uploads/znackarna/update-log.json on the first front-end or REST request — no wp-admin visit required. Still guarded by get_site_option, so dbDelta runs only once. This lets the web-audit connector see updateHistory.available flip to true on its next inventory pass rather than waiting for someone to log into wp-admin
 

@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.2.3
+ * Version:      1.3.0
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -804,6 +804,7 @@ final class Update_Logger
 
 		$payload = wp_json_encode([
 			'generated_at' => gmdate('c'),
+			'config'       => self::auto_update_config(),
 			'count'        => count($entries),
 			'entries'      => $entries,
 		]);
@@ -812,6 +813,88 @@ final class Update_Logger
 		}
 
 		@file_put_contents($base . '/update-log.json', $payload, LOCK_EX);
+	}
+
+	/**
+	 * Aktuální STAV auto-aktualizací (jádro/pluginy/témata + blokátory) pro web-audit konektor.
+	 * Toto WP core přes REST nevystavuje (/wp/v2/plugins pole auto_update nemá), a konektor nemá
+	 * WP-CLI/DB → čte to z tohoto mirroru. Zdroj pravdy: get_site_option('auto_update_plugins'),
+	 * konstanta WP_AUTO_UPDATE_CORE a options auto_update_core_major.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function auto_update_config(): array
+	{
+		if (! function_exists('get_plugins')) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$all_plugins  = array_keys(get_plugins());                          // ['akismet/akismet.php', ...]
+		$auto_plugins = array_values(array_intersect((array) get_site_option('auto_update_plugins', []), $all_plugins));
+		$all_themes   = array_keys(wp_get_themes());
+		$auto_themes  = array_values(array_intersect((array) get_site_option('auto_update_themes', []), $all_themes));
+
+		$plugins = [];
+		foreach ($all_plugins as $file) {
+			$slug = (false !== strpos($file, '/')) ? strtok($file, '/') : preg_replace('/\.php$/', '', $file);
+			$plugins[] = [
+				'slug' => $slug,
+				'file' => $file,
+				'auto' => in_array($file, $auto_plugins, true),
+			];
+		}
+
+		$updater_disabled = ( defined('AUTOMATIC_UPDATER_DISABLED') && AUTOMATIC_UPDATER_DISABLED )
+			|| ( defined('WP_AUTO_UPDATE_CORE') && false === WP_AUTO_UPDATE_CORE );
+
+		return [
+			'core'             => self::core_auto_level(),
+			'coreConstant'     => defined('WP_AUTO_UPDATE_CORE') ? self::scalar_to_string(WP_AUTO_UPDATE_CORE) : null,
+			'pluginsAuto'      => count($auto_plugins),
+			'pluginsTotal'     => count($all_plugins),
+			'themesAuto'       => count($auto_themes),
+			'themesTotal'      => count($all_themes),
+			'updaterDisabled'  => (bool) $updater_disabled,
+			'fileModsDisabled' => defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS,
+			'plugins'          => $plugins,
+		];
+	}
+
+	/**
+	 * Efektivní úroveň auto-updatů jádra: off | minor | major. Kopíruje logiku WP core
+	 * (konstanta WP_AUTO_UPDATE_CORE má přednost; jinak option auto_update_core_major, default
+	 * = jen minor). AUTOMATIC_UPDATER_DISABLED / WP_AUTO_UPDATE_CORE=false → off (vše vypnuto).
+	 */
+	private static function core_auto_level(): string
+	{
+		if ( defined('AUTOMATIC_UPDATER_DISABLED') && AUTOMATIC_UPDATER_DISABLED ) {
+			return 'off';
+		}
+		if ( defined('WP_AUTO_UPDATE_CORE') ) {
+			$v = WP_AUTO_UPDATE_CORE;
+			if ( false === $v ) {
+				return 'off';
+			}
+			if ( true === $v || 'major' === $v ) {
+				return 'major';
+			}
+			if ( 'minor' === $v ) {
+				return 'minor';
+			}
+		}
+		// Konstanta nenastavená → efektivní default z option (WP 5.6+). 'enabled' = i major.
+		return ( 'enabled' === get_site_option('auto_update_core_major', 'unset') ) ? 'major' : 'minor';
+	}
+
+	private static function scalar_to_string($v): string
+	{
+		if ( true === $v ) {
+			return 'true';
+		}
+		if ( false === $v ) {
+			return 'false';
+		}
+		return (string) $v;
 	}
 
 	/* ===========================================================
