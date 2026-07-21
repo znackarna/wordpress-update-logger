@@ -5,7 +5,7 @@
  * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
  * Author URI:   https://www.znackarna.cz
- * Version:      1.4.2
+ * Version:      1.4.3
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -32,17 +32,17 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 defined('ABSPATH') || exit;
 
-// Backstop proti dvojímu načtení (kdyby týž soubor přišel jako mu-plugin i jako normální
-// plugin současně): nezakládej třídu podruhé, jinak fatal. Primární ochranu řeší mu wrapper
-// (nezavede se, když v plugins/ existuje standalone verze), tohle je druhá pojistka.
-if (class_exists('Update_Logger')) {
-    return;
-}
+// Guard proti dvojímu načtení (mu-plugin + standalone současně). MUSÍ obalovat i deklaraci
+// třídy: PHP nepodmíněné top-level třídy hoistuje při KOMPILACI, takže samostatné
+// `if (class_exists('Update_Logger')) return;` nahoře by se spustilo VŽDY (třída už z
+// hoistingu existuje) a init() by se nikdy nezavolal. Podmíněná deklarace se deklaruje
+// až za běhu, takže guard funguje správně. Primární ochranu stejně řeší mu wrapper.
+if (! class_exists('Update_Logger')) :
 
 final class Update_Logger
 {
 
-	const VERSION     = '1.4.2';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.3';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -1344,3 +1344,5 @@ final class Update_Logger
 }
 
 Update_Logger::init();
+
+endif; // if (! class_exists('Update_Logger'))

@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.4.3 – 2026-07-21 ==
+* Fixed (critical): init() never ran on v1.3.2–1.4.2. The class-redeclaration backstop added in 1.3.2 was a plain `if (class_exists('Update_Logger')) return;` at the top of the file, but PHP hoists unconditional top-level class declarations at compile time — so the class always existed by the time the guard ran, the file returned early, and Update_Logger::init() was never called (no hooks, no REST endpoint, no mirror refresh). The guard now wraps the whole class + init() call in `if (! class_exists('Update_Logger')) : ... endif;`, which both prevents compile-time hoisting (so init runs) and still guards against a genuine double-load. Verified: single load registers all 17 hooks incl. rest_api_init; double load does not fatal
+
 == 1.4.2 – 2026-07-21 ==
 * Added: Read-only REST endpoint GET /wp-json/znackarna/v1/status returning the auto-update config, recent update history and an uploads-writability diagnostic. This is a robust transport for the web-audit connector: it is not page-cached, needs no uploads write and no FTP path guessing, and works on sites without an application password. Entry collection refactored into a shared collect_entries() (SELECT * + suppressed errors, schema-drift safe). The connector prefers this endpoint and falls back to the FTP JSON mirror
 
