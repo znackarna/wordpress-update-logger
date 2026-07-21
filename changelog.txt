@@ -1,5 +1,12 @@
 = Changelog =
 
+== 1.4.4 – 2026-07-21 ==
+* Security: The status endpoint and JSON mirror no longer expose the full installed-plugin list (a targeting fingerprint the connector never used — it only needs the auto-update counts) nor the server's absolute upload path (leaked the hosting username via diag.upload_basedir). The endpoint now returns only counts, core level, blockers and update history
+* Security: write_json_mirror now drops a deny .htaccess (+ index.php) into uploads/znackarna/ so the mirror JSON is not fetchable over HTTP on Apache/LiteSpeed (the connector reads it over FTP)
+* Fixed: rest_status no longer rebuilds config+entries twice and no longer writes the mirror on every anonymous GET — it calls the throttled maybe_refresh_mirror instead (removes an unauthenticated disk-write / double-work DoS vector)
+* Fixed: mirror is written atomically (temp + rename) so the connector never reads a half-written JSON over FTP
+* Fixed: maybe_refresh_mirror backs off (max once per hour) when uploads is not writable, instead of running the full get_plugins()/get_themes()/DB pipeline on every pageload; on multisite it writes only on the main site (no per-subsite fragmentation)
+
 == 1.4.3 – 2026-07-21 ==
 * Fixed (critical): init() never ran on v1.3.2–1.4.2. The class-redeclaration backstop added in 1.3.2 was a plain `if (class_exists('Update_Logger')) return;` at the top of the file, but PHP hoists unconditional top-level class declarations at compile time — so the class always existed by the time the guard ran, the file returned early, and Update_Logger::init() was never called (no hooks, no REST endpoint, no mirror refresh). The guard now wraps the whole class + init() call in `if (! class_exists('Update_Logger')) : ... endif;`, which both prevents compile-time hoisting (so init runs) and still guards against a genuine double-load. Verified: single load registers all 17 hooks incl. rest_api_init; double load does not fatal
 

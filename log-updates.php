@@ -5,7 +5,7 @@
  * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
  * Author URI:   https://www.znackarna.cz
- * Version:      1.4.3
+ * Version:      1.4.4
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -42,7 +42,7 @@ if (! class_exists('Update_Logger')) :
 final class Update_Logger
 {
 
-	const VERSION     = '1.4.3';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.4';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -366,17 +366,28 @@ final class Update_Logger
 	 */
 	public static function maybe_refresh_mirror(): void
 	{
+		// Multisite: mirror píše jen hlavní web (konektor čte main-site uploads; subsity by
+		// jen tříštily kopie). REST endpoint vrací živá data nezávisle na souboru.
+		if ( is_multisite() && ! is_main_site() ) {
+			return;
+		}
 		$dir = wp_upload_dir();
 		if (! empty($dir['error'])) {
 			return;
 		}
-		$file = trailingslashit($dir['basedir']) . 'znackarna/update-log.json';
-		$fresh = file_exists($file)
-			&& self::VERSION === get_site_option('update_logger_mirror_version')
-			&& ( time() - (int) filemtime($file) ) < 6 * HOUR_IN_SECONDS;
-		if ($fresh) {
+		$file   = trailingslashit($dir['basedir']) . 'znackarna/update-log.json';
+		$ver_ok = self::VERSION === get_site_option('update_logger_mirror_version');
+		if ( file_exists($file) && $ver_ok && ( time() - (int) filemtime($file) ) < 6 * HOUR_IN_SECONDS ) {
+			return; // čerstvé
+		}
+		// Backoff: když je uploads nezapisovatelné (soubor nikdy nevznikne), NEspouštěj plnou
+		// pipeline na každý pageload — po změně verze zkus vždy, jinak max 1×/h.
+		$now  = time();
+		$last = (int) get_site_option('update_logger_mirror_attempt', 0);
+		if ( $ver_ok && ( $now - $last ) < HOUR_IN_SECONDS ) {
 			return;
 		}
+		update_site_option('update_logger_mirror_attempt', $now);
 		self::write_json_mirror();
 		update_site_option('update_logger_mirror_version', self::VERSION);
 	}
@@ -855,17 +866,17 @@ final class Update_Logger
 	 */
 	public static function rest_status($request)
 	{
-		self::write_json_mirror(); // best-effort i souborový mirror
+		// Souborový mirror jen když je zastaralý (throttle) — ne plný zápis na každý GET.
+		self::maybe_refresh_mirror();
 		$dir = wp_upload_dir();
 		return array(
 			'plugin'  => 'sprava-znackarny',
 			'version' => self::VERSION,
 			'config'  => self::auto_update_config(),
 			'entries' => self::collect_entries(50),
+			// Bez absolutní cesty (prozrazovala hosting username) — konektoru stačí writable.
 			'diag'    => array(
-				'upload_basedir' => isset($dir['basedir']) ? $dir['basedir'] : null,
-				'upload_error'   => ! empty($dir['error']) ? $dir['error'] : null,
-				'writable'       => empty($dir['error']) ? wp_is_writable($dir['basedir']) : false,
+				'writable' => empty($dir['error']) ? (bool) wp_is_writable($dir['basedir']) : false,
 			),
 		);
 	}
@@ -887,6 +898,13 @@ final class Update_Logger
 		if (! wp_mkdir_p($base)) {
 			return;
 		}
+		// Data jsou pro konektor (čte přes FTP), NE pro veřejnost → zamezit HTTP přístup.
+		if (! file_exists($base . '/.htaccess')) {
+			@file_put_contents($base . '/.htaccess', "Require all denied\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+		}
+		if (! file_exists($base . '/index.php')) {
+			@file_put_contents($base . '/index.php', "<?php // Silence is golden.\n");
+		}
 
 		$payload = wp_json_encode(array(
 			'generated_at' => gmdate('c'),
@@ -897,8 +915,13 @@ final class Update_Logger
 		if (false === $payload) {
 			return;
 		}
-
-		@file_put_contents($base . '/update-log.json', $payload);
+		// Atomický zápis (temp + rename) — konektor přes FTP nikdy nenačte roztržený JSON.
+		$tmp = $base . '/update-log.json.' . getmypid() . '.tmp';
+		if (false !== @file_put_contents($tmp, $payload)) {
+			if (! @rename($tmp, $base . '/update-log.json')) {
+				@unlink($tmp);
+			}
+		}
 	}
 
 	/**
@@ -920,16 +943,6 @@ final class Update_Logger
 		$all_themes   = array_keys(wp_get_themes());
 		$auto_themes  = array_values(array_intersect((array) get_site_option('auto_update_themes', []), $all_themes));
 
-		$plugins = [];
-		foreach ($all_plugins as $file) {
-			$slug = (false !== strpos($file, '/')) ? strtok($file, '/') : preg_replace('/\.php$/', '', $file);
-			$plugins[] = [
-				'slug' => $slug,
-				'file' => $file,
-				'auto' => in_array($file, $auto_plugins, true),
-			];
-		}
-
 		$updater_disabled = ( defined('AUTOMATIC_UPDATER_DISABLED') && AUTOMATIC_UPDATER_DISABLED )
 			|| ( defined('WP_AUTO_UPDATE_CORE') && false === WP_AUTO_UPDATE_CORE );
 
@@ -942,7 +955,6 @@ final class Update_Logger
 			'themesTotal'      => count($all_themes),
 			'updaterDisabled'  => (bool) $updater_disabled,
 			'fileModsDisabled' => defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS,
-			'plugins'          => $plugins,
 		];
 	}
 
