@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.3.0
+ * Version:      1.3.1
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -34,6 +34,7 @@ defined('ABSPATH') || exit;
 final class Update_Logger
 {
 
+	const VERSION     = '1.3.1';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -73,6 +74,8 @@ final class Update_Logger
 		// nasazuje značkárna web-audit konektor přes FTP). Guardováno get_site_option → dbDelta
 		// proběhne reálně jen jednou.
 		add_action('init', [__CLASS__, 'maybe_create_table']);
+		// Po vytvoření tabulky (priorita 20 > 10) udrž JSON mirror + config blok čerstvý.
+		add_action('init', [__CLASS__, 'maybe_refresh_mirror'], 20);
 		add_action('plugins_loaded', [__CLASS__, 'load_textdomain']);
 
 		// Version snapshot — only on pages where a manual update can occur.
@@ -339,10 +342,32 @@ final class Update_Logger
 		dbDelta($sql);
 
 		update_site_option(self::OPTION_KEY, self::DB_VERSION);
+		// Materializaci/refresh mirroru řeší maybe_refresh_mirror (na init) — tady ne (tabulka
+		// nemusí ještě existovat u hodně brzkého volání).
+	}
 
-		// Po (re)vytvoření tabulky rovnou zmateralizuj JSON mirror z existující historie —
-		// aby ho web-audit konektor našel hned po nasazení, ne až po první další aktualizaci.
+	/**
+	 * Zajistí, že JSON mirror je aktuální — přepíše ho, když chybí, změnila se verze pluginu
+	 * (po nasazení nové verze konektorem), nebo je starší než 6 h. Drží tím blok `config`
+	 * (stav auto-updatů) čerstvý bez závislosti na wp-cronu: každý denní REST průchod konektoru
+	 * zapálí `init` a mirror se přegeneruje ještě před tím, než ho konektor přečte přes FTP.
+	 * Levné — jen filemtime; skutečný zápis běží zřídka.
+	 */
+	public static function maybe_refresh_mirror(): void
+	{
+		$dir = wp_upload_dir();
+		if (! empty($dir['error'])) {
+			return;
+		}
+		$file = trailingslashit($dir['basedir']) . 'znackarna/update-log.json';
+		$fresh = file_exists($file)
+			&& self::VERSION === get_site_option('update_logger_mirror_version')
+			&& ( time() - (int) filemtime($file) ) < 6 * HOUR_IN_SECONDS;
+		if ($fresh) {
+			return;
+		}
 		self::write_json_mirror();
+		update_site_option('update_logger_mirror_version', self::VERSION);
 	}
 
 	/* ===========================================================
