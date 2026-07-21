@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.2.2 – 2026-07-21 ==
+* Added: Must-use plugin mode. When the file lives directly in WPMU_PLUGIN_DIR (the značkárna web-audit connector deploys it there over FTP — no activation, connector-managed updates), the GitHub self-updater is skipped so it does not inject a phantom "update available" for a plugin WordPress has no entry for. As a normal plugin the self-updater behaves exactly as before. Table creation, logging, admin log page and the JSON mirror all work in both modes
+
 == 1.2.1 – 2026-07-21 ==
 * Added: JSON mirror of the update log at wp-content/uploads/znackarna/update-log.json (path via wp_upload_dir(), so it respects WP_CONTENT_FOLDERNAME like "files"). Written after every insert_row and once on table (re)creation. Contains the last 50 events with no PII (at/type/slug/from/to/status/method) so the značkárna web-audit connector — which has no WP-CLI/DB access, only FTP/REST — can read the real update history and surface it in the CRM (updateHistory block of web-audit/report@1)
 * Note: The mirror is additive and fails silently; it does not change the update_log table or any existing behaviour

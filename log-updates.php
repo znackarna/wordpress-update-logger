@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.2.1
+ * Version:      1.2.2
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -61,7 +61,12 @@ final class Update_Logger
 
 	public static function init(): void
 	{
-		self::register_update_checker();
+		// GitHub self-updater dává smysl jen jako běžný plugin. Jako mu-plugin (nasazuje
+		// značkárna web-audit konektor přes FTP a updatuje sám) by injektoval fantomový
+		// „update available" pro plugin, který WP v seznamu nemá → přeskočit.
+		if (! self::is_mu_plugin()) {
+			self::register_update_checker();
+		}
 
 		add_action('admin_init', [__CLASS__, 'maybe_create_table']);
 		add_action('plugins_loaded', [__CLASS__, 'load_textdomain']);
@@ -91,6 +96,19 @@ final class Update_Logger
 		} else {
 			add_action('admin_menu', [__CLASS__, 'register_menu']);
 		}
+	}
+
+	/**
+	 * Běží plugin jako must-use plugin (soubor přímo ve WPMU_PLUGIN_DIR)? Konektor ho tam
+	 * nasazuje přes FTP — bez aktivace, updaty řídí sám. V tom režimu se GitHub self-updater
+	 * vypíná (mu-plugin je pro WP update systém neviditelný).
+	 */
+	private static function is_mu_plugin(): bool
+	{
+		if (! defined('WPMU_PLUGIN_DIR')) {
+			return false;
+		}
+		return 0 === strpos(wp_normalize_path(__FILE__), wp_normalize_path(WPMU_PLUGIN_DIR));
 	}
 
 	/* ===========================================================
