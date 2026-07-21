@@ -5,7 +5,7 @@
  * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
  * Author URI:   https://www.znackarna.cz
- * Version:      1.4.0
+ * Version:      1.4.1
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -42,7 +42,7 @@ if (class_exists('Update_Logger')) {
 final class Update_Logger
 {
 
-	const VERSION     = '1.4.0';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.1';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -802,28 +802,34 @@ final class Update_Logger
 	 */
 	public static function write_json_mirror(): void
 	{
+		// Config (stav auto-updatů) je nezávislý na tabulce → sestav ho VŽDY, i když dotaz
+		// na update_log selže (stará/chybějící tabulka). Jinak by web bez čitelné historie
+		// nedodal ani stav auto-updatů.
+		$config = self::auto_update_config();
+
+		$entries = array();
 		global $wpdb;
 		$table = self::table_name();
-		$rows  = $wpdb->get_results(
-			"SELECT logged_at, update_type, slug, old_version, new_version, status, method
-			 FROM {$table} ORDER BY logged_at DESC, id DESC LIMIT 50",
+		// SELECT * + suppress: odolné vůči schema driftu (stará standalone tabulka nemusí mít
+		// všechny sloupce) i vůči chybějící tabulce — nesmí to shodit zápis mirroru.
+		$suppress = $wpdb->suppress_errors(true);
+		$rows = $wpdb->get_results(
+			"SELECT * FROM {$table} ORDER BY logged_at DESC, id DESC LIMIT 50",
 			ARRAY_A
 		);
-		if (! is_array($rows)) {
-			return;
-		}
-
-		$entries = [];
-		foreach ($rows as $r) {
-			$entries[] = [
-				'at'     => str_replace(' ', 'T', (string) $r['logged_at']),
-				'type'   => $r['update_type'],
-				'slug'   => $r['slug'],
-				'from'   => $r['old_version'],
-				'to'     => $r['new_version'],
-				'status' => $r['status'],
-				'method' => $r['method'],
-			];
+		$wpdb->suppress_errors($suppress);
+		if (is_array($rows)) {
+			foreach ($rows as $r) {
+				$entries[] = array(
+					'at'     => str_replace(' ', 'T', (string) ($r['logged_at'] ?? '')),
+					'type'   => $r['update_type'] ?? '',
+					'slug'   => $r['slug'] ?? '',
+					'from'   => $r['old_version'] ?? '',
+					'to'     => $r['new_version'] ?? '',
+					'status' => $r['status'] ?? 'ok',
+					'method' => $r['method'] ?? 'auto',
+				);
+			}
 		}
 
 		$dir = wp_upload_dir();
@@ -835,17 +841,17 @@ final class Update_Logger
 			return;
 		}
 
-		$payload = wp_json_encode([
+		$payload = wp_json_encode(array(
 			'generated_at' => gmdate('c'),
-			'config'       => self::auto_update_config(),
+			'config'       => $config,
 			'count'        => count($entries),
 			'entries'      => $entries,
-		]);
+		));
 		if (false === $payload) {
 			return;
 		}
 
-		@file_put_contents($base . '/update-log.json', $payload, LOCK_EX);
+		@file_put_contents($base . '/update-log.json', $payload);
 	}
 
 	/**

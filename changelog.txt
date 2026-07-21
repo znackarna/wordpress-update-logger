@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.4.1 – 2026-07-21 ==
+* Fixed: The JSON mirror now always writes the "config" block (auto-update state) even when the update_log query fails — e.g. a site that ran an older standalone version left a table with a different schema, so `SELECT ... method ...` errored and the whole mirror write bailed, leaving the connector with no data. The query is now `SELECT *` with suppressed errors and null-coalesced columns, config is built independently of the table, and file_put_contents no longer uses LOCK_EX (better cross-host compatibility)
+
 == 1.4.0 – 2026-07-21 ==
 * Changed: Renamed to "Správa značkárny" (Author: značkárna s.r.o.) with a descriptive header, so the must-use bootstrap wrapper and the plugin list show a meaningful name instead of the bare filename. Admin log page menu label follows. Internal slugs, text domain and the update_log DB table are unchanged — no data or behaviour impact, only the display identity
 
