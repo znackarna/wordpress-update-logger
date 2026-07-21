@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.4.0 – 2026-07-21 ==
+* Changed: Renamed to "Správa značkárny" (Author: značkárna s.r.o.) with a descriptive header, so the must-use bootstrap wrapper and the plugin list show a meaningful name instead of the bare filename. Admin log page menu label follows. Internal slugs, text domain and the update_log DB table are unchanged — no data or behaviour impact, only the display identity
+
 == 1.3.2 – 2026-07-21 ==
 * Fixed: Guard against a fatal class redeclaration when the plugin is present both as a must-use plugin (connector-deployed) and as a regular plugin. A `class_exists('Update_Logger')` backstop at the top of the file returns early instead of declaring the class twice. The primary protection lives in the connector's mu bootstrap wrapper (it does not load the mu copy when a standalone update-logger / wordpress-update-logger plugin exists in plugins/); this is the second line of defence. Prevents the HTTP 500 seen when a site already ran the standalone plugin
 

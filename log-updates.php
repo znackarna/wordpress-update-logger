@@ -1,10 +1,11 @@
 <?php
 
 /**
- * Plugin Name:  Update Logger
- * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
+ * Plugin Name:  Správa značkárny
+ * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
- * Version:      1.3.2
+ * Author URI:   https://www.znackarna.cz
+ * Version:      1.4.0
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -41,7 +42,7 @@ if (class_exists('Update_Logger')) {
 final class Update_Logger
 {
 
-	const VERSION     = '1.3.2';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.0';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -937,8 +938,8 @@ final class Update_Logger
 	{
 		add_submenu_page(
 			is_multisite() ? 'settings.php' : 'tools.php',
-			__('Update Log', self::TEXT_DOMAIN),
-			__('Update Log', self::TEXT_DOMAIN),
+			__('Správa značkárny', self::TEXT_DOMAIN),
+			__('Správa značkárny', self::TEXT_DOMAIN),
 			is_multisite() ? 'manage_network' : 'manage_options',
 			self::MENU_SLUG,
 			[__CLASS__, 'render_page']
