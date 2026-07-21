@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.4.2 – 2026-07-21 ==
+* Added: Read-only REST endpoint GET /wp-json/znackarna/v1/status returning the auto-update config, recent update history and an uploads-writability diagnostic. This is a robust transport for the web-audit connector: it is not page-cached, needs no uploads write and no FTP path guessing, and works on sites without an application password. Entry collection refactored into a shared collect_entries() (SELECT * + suppressed errors, schema-drift safe). The connector prefers this endpoint and falls back to the FTP JSON mirror
+
 == 1.4.1 – 2026-07-21 ==
 * Fixed: The JSON mirror now always writes the "config" block (auto-update state) even when the update_log query fails — e.g. a site that ran an older standalone version left a table with a different schema, so `SELECT ... method ...` errored and the whole mirror write bailed, leaving the connector with no data. The query is now `SELECT *` with suppressed errors and null-coalesced columns, config is built independently of the table, and file_put_contents no longer uses LOCK_EX (better cross-host compatibility)
 

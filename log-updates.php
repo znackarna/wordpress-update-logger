@@ -5,7 +5,7 @@
  * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
  * Author URI:   https://www.znackarna.cz
- * Version:      1.4.1
+ * Version:      1.4.2
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -42,7 +42,7 @@ if (class_exists('Update_Logger')) {
 final class Update_Logger
 {
 
-	const VERSION     = '1.4.1';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.2';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -84,6 +84,9 @@ final class Update_Logger
 		add_action('init', [__CLASS__, 'maybe_create_table']);
 		// Po vytvoření tabulky (priorita 20 > 10) udrž JSON mirror + config blok čerstvý.
 		add_action('init', [__CLASS__, 'maybe_refresh_mirror'], 20);
+		// Read-only REST endpoint pro web-audit konektor (robustní transport: necachuje se,
+		// nezávisí na zápisu do uploads; funguje i na webech bez app-passwordu).
+		add_action('rest_api_init', [__CLASS__, 'register_rest']);
 		add_action('plugins_loaded', [__CLASS__, 'load_textdomain']);
 
 		// Version snapshot — only on pages where a manual update can occur.
@@ -800,24 +803,23 @@ final class Update_Logger
 	 * Cesta jde přes wp_upload_dir() → respektuje WP_CONTENT_FOLDERNAME (např. „files"). Soubor
 	 * neobsahuje žádné PII (jen slug/verze/status/metoda). Selhání je tiché (mirror je aditivní).
 	 */
-	public static function write_json_mirror(): void
+	/**
+	 * Posledních $limit událostí z update_log jako pole (bez PII). Odolné vůči schema driftu
+	 * (stará standalone tabulka) i chybějící tabulce — SELECT * + suppress + null-coalesce.
+	 *
+	 * @return array<int,array<string,string>>
+	 */
+	private static function collect_entries(int $limit): array
 	{
-		// Config (stav auto-updatů) je nezávislý na tabulce → sestav ho VŽDY, i když dotaz
-		// na update_log selže (stará/chybějící tabulka). Jinak by web bez čitelné historie
-		// nedodal ani stav auto-updatů.
-		$config = self::auto_update_config();
-
-		$entries = array();
 		global $wpdb;
-		$table = self::table_name();
-		// SELECT * + suppress: odolné vůči schema driftu (stará standalone tabulka nemusí mít
-		// všechny sloupce) i vůči chybějící tabulce — nesmí to shodit zápis mirroru.
+		$table    = self::table_name();
 		$suppress = $wpdb->suppress_errors(true);
-		$rows = $wpdb->get_results(
-			"SELECT * FROM {$table} ORDER BY logged_at DESC, id DESC LIMIT 50",
+		$rows     = $wpdb->get_results(
+			"SELECT * FROM {$table} ORDER BY logged_at DESC, id DESC LIMIT " . (int) $limit,
 			ARRAY_A
 		);
 		$wpdb->suppress_errors($suppress);
+		$entries = array();
 		if (is_array($rows)) {
 			foreach ($rows as $r) {
 				$entries[] = array(
@@ -831,6 +833,51 @@ final class Update_Logger
 				);
 			}
 		}
+		return $entries;
+	}
+
+	/* ===========================================================
+	 *  REST endpoint (web-audit konektor)
+	 * =========================================================== */
+
+	public static function register_rest(): void
+	{
+		register_rest_route('znackarna/v1', '/status', array(
+			'methods'             => 'GET',
+			'permission_callback' => '__return_true', // read-only, bez PII; interní monitoring
+			'callback'            => array(__CLASS__, 'rest_status'),
+		));
+	}
+
+	/**
+	 * Stav webu pro web-audit konektor: config (auto-updaty) + historie + diagnostika mirroru.
+	 * Při dotazu rovnou zkusí přepsat i souborový mirror (fallback pro weby bez REST čtení).
+	 */
+	public static function rest_status($request)
+	{
+		self::write_json_mirror(); // best-effort i souborový mirror
+		$dir = wp_upload_dir();
+		return array(
+			'plugin'  => 'sprava-znackarny',
+			'version' => self::VERSION,
+			'config'  => self::auto_update_config(),
+			'entries' => self::collect_entries(50),
+			'diag'    => array(
+				'upload_basedir' => isset($dir['basedir']) ? $dir['basedir'] : null,
+				'upload_error'   => ! empty($dir['error']) ? $dir['error'] : null,
+				'writable'       => empty($dir['error']) ? wp_is_writable($dir['basedir']) : false,
+			),
+		);
+	}
+
+	public static function write_json_mirror(): void
+	{
+		// Config (stav auto-updatů) je nezávislý na tabulce → sestav ho VŽDY, i když dotaz
+		// na update_log selže (stará/chybějící tabulka). Jinak by web bez čitelné historie
+		// nedodal ani stav auto-updatů.
+		$config = self::auto_update_config();
+
+		$entries = self::collect_entries(50);
 
 		$dir = wp_upload_dir();
 		if (! empty($dir['error'])) {
