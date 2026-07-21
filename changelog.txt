@@ -1,5 +1,9 @@
 = Changelog =
 
+== 1.2.1 – 2026-07-21 ==
+* Added: JSON mirror of the update log at wp-content/uploads/znackarna/update-log.json (path via wp_upload_dir(), so it respects WP_CONTENT_FOLDERNAME like "files"). Written after every insert_row and once on table (re)creation. Contains the last 50 events with no PII (at/type/slug/from/to/status/method) so the značkárna web-audit connector — which has no WP-CLI/DB access, only FTP/REST — can read the real update history and surface it in the CRM (updateHistory block of web-audit/report@1)
+* Note: The mirror is additive and fails silently; it does not change the update_log table or any existing behaviour
+
 == 1.2.0 – 2026-05-14 ==
 * Added: Self-update from GitHub releases. The plugin polls api.github.com/repos/znackarna/wordpress-update-logger/releases/latest once per 12 h and injects the latest tag into the WordPress update transient, so new versions appear in the standard "Plugins → Updates available" UI without any external library
 * Added: register_update_checker() wires three filters (pre_set_site_transient_update_plugins, plugins_api, upgrader_source_selection) and a 12-hour cached fetch_latest_release() helper. The upgrader_source_selection hook renames GitHub's zipball folder (znackarna-wordpress-update-logger-&lt;sha&gt;) to the canonical wordpress-update-logger slug so the plugin path survives the update

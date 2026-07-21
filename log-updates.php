@@ -4,7 +4,7 @@
  * Plugin Name:  Update Logger
  * Description:  Logs all WordPress core, plugin and theme updates (auto & manual) to the database.
  * Author:       značkárna s.r.o.
- * Version:      1.2.0
+ * Version:      1.2.1
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -317,6 +317,10 @@ final class Update_Logger
 		dbDelta($sql);
 
 		update_site_option(self::OPTION_KEY, self::DB_VERSION);
+
+		// Po (re)vytvoření tabulky rovnou zmateralizuj JSON mirror z existující historie —
+		// aby ho web-audit konektor našel hned po nasazení, ne až po první další aktualizaci.
+		self::write_json_mirror();
 	}
 
 	/* ===========================================================
@@ -725,6 +729,67 @@ final class Update_Logger
 			],
 			['%s', '%s', '%s', '%s', '%s', '%s']
 		);
+
+		// Zrcadlo do uploads: strojově čitelný JSON pro web-audit konektor (nemá WP-CLI/DB
+		// přístup, čte přes FTP). Bez PII, posledních 50 událostí. Píše se po každém zápisu
+		// (aktualizace jsou vzácné → náklad zanedbatelný).
+		self::write_json_mirror();
+	}
+
+	/* ===========================================================
+	 *  JSON mirror (pro externí monitoring přes FTP)
+	 * =========================================================== */
+
+	/**
+	 * Přepíše wp-content/uploads/znackarna/update-log.json posledními ~50 událostmi z tabulky.
+	 * Cesta jde přes wp_upload_dir() → respektuje WP_CONTENT_FOLDERNAME (např. „files"). Soubor
+	 * neobsahuje žádné PII (jen slug/verze/status/metoda). Selhání je tiché (mirror je aditivní).
+	 */
+	public static function write_json_mirror(): void
+	{
+		global $wpdb;
+		$table = self::table_name();
+		$rows  = $wpdb->get_results(
+			"SELECT logged_at, update_type, slug, old_version, new_version, status, method
+			 FROM {$table} ORDER BY logged_at DESC, id DESC LIMIT 50",
+			ARRAY_A
+		);
+		if (! is_array($rows)) {
+			return;
+		}
+
+		$entries = [];
+		foreach ($rows as $r) {
+			$entries[] = [
+				'at'     => str_replace(' ', 'T', (string) $r['logged_at']),
+				'type'   => $r['update_type'],
+				'slug'   => $r['slug'],
+				'from'   => $r['old_version'],
+				'to'     => $r['new_version'],
+				'status' => $r['status'],
+				'method' => $r['method'],
+			];
+		}
+
+		$dir = wp_upload_dir();
+		if (! empty($dir['error'])) {
+			return;
+		}
+		$base = trailingslashit($dir['basedir']) . 'znackarna';
+		if (! wp_mkdir_p($base)) {
+			return;
+		}
+
+		$payload = wp_json_encode([
+			'generated_at' => gmdate('c'),
+			'count'        => count($entries),
+			'entries'      => $entries,
+		]);
+		if (false === $payload) {
+			return;
+		}
+
+		@file_put_contents($base . '/update-log.json', $payload, LOCK_EX);
 	}
 
 	/* ===========================================================
