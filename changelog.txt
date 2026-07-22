@@ -1,5 +1,8 @@
 = Changelog =
 
+== 1.4.5 – 2026-07-22 ==
+* Added: pendingUpdates — dostupné, ale ještě neprovedené aktualizace jádra, pluginů a témat čtené z WordPress update transientů (update_core / update_plugins / update_themes). Vystaveno v REST status endpointu i v JSON mirroru vedle config/entries, s per-položkou from/to verzí, name, source (wordpress.org vs external = premium/vlastní updater podle package URL) a auto flagem (zapnutý auto-update). Jádro je buď {from,to} nebo null; count = core(0/1) + pluginy + témata; checkedAt z transient last_checked. Čistě read-only — jen čte transienty, nespouští žádný wp_update_plugins()/síťový update check. WordPress core per-plugin/theme pending stav přes REST nevystavuje a značkárna web-audit konektor nemá WP-CLI/DB přístup, čte to proto odsud
+
 == 1.4.4 – 2026-07-21 ==
 * Security: The status endpoint and JSON mirror no longer expose the full installed-plugin list (a targeting fingerprint the connector never used — it only needs the auto-update counts) nor the server's absolute upload path (leaked the hosting username via diag.upload_basedir). The endpoint now returns only counts, core level, blockers and update history
 * Security: write_json_mirror now drops a deny .htaccess (+ index.php) into uploads/znackarna/ so the mirror JSON is not fetchable over HTTP on Apache/LiteSpeed (the connector reads it over FTP)

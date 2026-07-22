@@ -5,7 +5,7 @@
  * Description:  Servisní a monitorovací komponenta značkárny. Loguje aktualizace jádra, pluginů a témat (automatické i ruční) a zpřístupňuje stav webu pro centrální dohled (web-audit). Nasazuje a spravuje značkárna.
  * Author:       značkárna s.r.o.
  * Author URI:   https://www.znackarna.cz
- * Version:      1.4.4
+ * Version:      1.4.5
  * Text Domain:  update-logger
  * Domain Path:  /languages
  * Network:      true
@@ -42,7 +42,7 @@ if (! class_exists('Update_Logger')) :
 final class Update_Logger
 {
 
-	const VERSION     = '1.4.4';   // synchronně s hlavičkou; řídí refresh JSON mirroru
+	const VERSION     = '1.4.5';   // synchronně s hlavičkou; řídí refresh JSON mirroru
 	const DB_VERSION  = '1.0';
 	const OPTION_KEY  = 'update_logger_db_version';
 	const SNAP_KEY    = 'update_logger_version_snapshot';
@@ -873,6 +873,7 @@ final class Update_Logger
 			'plugin'  => 'sprava-znackarny',
 			'version' => self::VERSION,
 			'config'  => self::auto_update_config(),
+			'pending' => self::pending_updates(),
 			'entries' => self::collect_entries(50),
 			// Bez absolutní cesty (prozrazovala hosting username) — konektoru stačí writable.
 			'diag'    => array(
@@ -909,6 +910,7 @@ final class Update_Logger
 		$payload = wp_json_encode(array(
 			'generated_at' => gmdate('c'),
 			'config'       => $config,
+			'pending'      => self::pending_updates(),
 			'count'        => count($entries),
 			'entries'      => $entries,
 		));
@@ -956,6 +958,107 @@ final class Update_Logger
 			'updaterDisabled'  => (bool) $updater_disabled,
 			'fileModsDisabled' => defined('DISALLOW_FILE_MODS') && DISALLOW_FILE_MODS,
 		];
+	}
+
+	/**
+	 * Dostupné, ale ještě NEPROVEDENÉ aktualizace jádra/pluginů/témat z WP update transientů
+	 * (co WP zná jako „k dispozici"). Čistě READ-ONLY: čte jen `update_core` / `update_plugins`
+	 * / `update_themes` transienty — ŽÁDNÝ wp_update_plugins()/síťový check (ten řídí wp-cron).
+	 * Zdroj pro web-audit konektor (WP core to přes /wp/v2/plugins nevystavuje, konektor nemá
+	 * WP-CLI/DB). `source`: wordpress.org (package přes downloads.wordpress.org) vs external
+	 * (premium/vlastní updater). `auto` = má položka zapnutý auto-update.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public static function pending_updates(): array
+	{
+		if (! function_exists('get_plugins')) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		// --- Jádro: pending jen když některá nabídka má response === 'upgrade' ---
+		$core = null;
+		$uc   = get_site_transient('update_core');
+		if (is_object($uc) && ! empty($uc->updates) && is_array($uc->updates)) {
+			foreach ($uc->updates as $u) {
+				if (is_object($u) && isset($u->response) && 'upgrade' === $u->response) {
+					$core = [
+						'from' => (string) get_bloginfo('version'),
+						'to'   => (string) ($u->current ?? ''),
+					];
+					break;
+				}
+			}
+		}
+
+		// --- Pluginy ---
+		$plugins   = array();
+		$installed = get_plugins();                                   // from-verze + name
+		$pt        = get_site_transient('update_plugins');
+		$auto_p    = (array) get_site_option('auto_update_plugins', array());
+		if (is_object($pt) && ! empty($pt->response) && is_array($pt->response)) {
+			foreach ($pt->response as $file => $u) {
+				$new = is_object($u) ? ($u->new_version ?? '') : (is_array($u) ? ($u['new_version'] ?? '') : '');
+				if ('' === (string) $new) {
+					continue; // deleted/disabled response bez verze
+				}
+				$package = is_object($u) ? ($u->package ?? '') : (is_array($u) ? ($u['package'] ?? '') : '');
+				$data    = $installed[$file] ?? array();
+				$slug    = strtok((string) $file, '/');
+				if (false === strpos((string) $file, '/')) {
+					$slug = basename((string) $file, '.php'); // single-file plugin
+				}
+				$plugins[] = array(
+					'slug'   => (string) $slug,
+					'name'   => (string) ($data['Name'] ?? $slug),
+					'from'   => (string) ($data['Version'] ?? ''),
+					'to'     => (string) $new,
+					'source' => (false !== strpos((string) $package, 'downloads.wordpress.org')) ? 'wordpress.org' : 'external',
+					'auto'   => in_array($file, $auto_p, true),
+				);
+			}
+		}
+
+		// --- Témata ---
+		$themes    = array();
+		$all_th    = wp_get_themes();
+		$tt        = get_site_transient('update_themes');
+		$auto_t    = (array) get_site_option('auto_update_themes', array());
+		if (is_object($tt) && ! empty($tt->response) && is_array($tt->response)) {
+			foreach ($tt->response as $stylesheet => $u) {
+				$new = is_array($u) ? ($u['new_version'] ?? '') : (is_object($u) ? ($u->new_version ?? '') : '');
+				if ('' === (string) $new) {
+					continue;
+				}
+				$package = is_array($u) ? ($u['package'] ?? '') : (is_object($u) ? ($u->package ?? '') : '');
+				$theme   = $all_th[$stylesheet] ?? null;
+				$themes[] = array(
+					'slug'   => (string) $stylesheet,
+					'name'   => ($theme instanceof WP_Theme) ? (string) $theme->get('Name') : (string) $stylesheet,
+					'from'   => ($theme instanceof WP_Theme) ? (string) $theme->get('Version') : '',
+					'to'     => (string) $new,
+					'source' => (false !== strpos((string) $package, 'downloads.wordpress.org')) ? 'wordpress.org' : 'external',
+					'auto'   => in_array($stylesheet, $auto_t, true),
+				);
+			}
+		}
+
+		// checkedAt: kdy WP naposledy prováděl update check (transient last_checked).
+		$checked_ts = 0;
+		if (is_object($pt) && ! empty($pt->last_checked)) {
+			$checked_ts = (int) $pt->last_checked;
+		} elseif (is_object($uc) && ! empty($uc->last_checked)) {
+			$checked_ts = (int) $uc->last_checked;
+		}
+
+		return array(
+			'available' => true,
+			'core'      => $core,
+			'plugins'   => $plugins,
+			'themes'    => $themes,
+			'count'     => ($core ? 1 : 0) + count($plugins) + count($themes),
+			'checkedAt' => $checked_ts > 0 ? gmdate('c', $checked_ts) : null,
+		);
 	}
 
 	/**
